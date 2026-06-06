@@ -416,7 +416,7 @@ input {
 }
 
 .image-sheet {
-  min-width: 300px;
+  min-width: 420px;
 }
 
 .asset-sheet th:nth-child(3),
@@ -425,11 +425,20 @@ input {
   width: 90px;
 }
 
+.image-sheet th:nth-child(3) {
+  width: 72px;
+}
+
 .sheet td {
   background: #fff;
   cursor: cell;
   outline: none;
   user-select: none;
+}
+
+.sheet td[data-readonly="true"] {
+  background: #f8fafc;
+  color: #667085;
 }
 
 .sheet tr.is-active-row td,

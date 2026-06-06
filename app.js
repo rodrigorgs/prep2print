@@ -1,5 +1,5 @@
 const assetColumns = ["File Name", "Rows", "Columns", "Images"];
-const imageColumns = ["Alias"];
+const imageColumns = ["Asset", "Index", "Alias"];
 
 const state = {
   currentStep: "templates",
@@ -287,7 +287,11 @@ function syncImagesFromAssets() {
 }
 
 function syncImageSheet() {
-  state.sheets.images = state.images.map((image) => [image.alias]);
+  state.sheets.images = state.images.map((image) => [
+    image.assetFileName,
+    String(image.index + 1),
+    image.alias,
+  ]);
 }
 
 function syncImageFromSheet(rowIndex) {
@@ -297,8 +301,10 @@ function syncImageFromSheet(rowIndex) {
   }
 
   const row = state.sheets.images[rowIndex];
-  image.alias = row[0] || defaultImageAlias(image);
-  row[0] = image.alias;
+  image.alias = row[2] || defaultImageAlias(image);
+  row[0] = image.assetFileName;
+  row[1] = String(image.index + 1);
+  row[2] = image.alias;
 }
 
 function defaultImageAlias(image) {
@@ -598,6 +604,7 @@ function renderSheet(table, sheetName, columns) {
       td.dataset.sheet = sheetName;
       td.dataset.row = String(rowIndex);
       td.dataset.col = String(colIndex);
+      td.dataset.readonly = String(isReadOnlyCell(sheetName, colIndex));
       td.textContent = row[colIndex] ?? "";
       td.addEventListener("focus", selectCell);
       td.addEventListener("mousedown", beginSelection);
@@ -624,6 +631,10 @@ function renderSheetHeader(table, columns) {
     th.textContent = column;
     headRow.append(th);
   }
+}
+
+function isReadOnlyCell(sheetName, colIndex) {
+  return sheetName === "images" && colIndex < 2;
 }
 
 function handleCellClick(event) {
@@ -654,8 +665,29 @@ function updateSheetActiveRow(table, sheetName) {
   });
 }
 
+function updateSelectedEntityFromCell(cell) {
+  const sheetName = cell.dataset.sheet;
+  const rowIndex = Number(cell.dataset.row);
+
+  if (sheetName === "assets" && state.assets[rowIndex]) {
+    state.selectedAssetId = state.assets[rowIndex].id;
+    renderAssetList();
+    updateSheetActiveRow(elements.assetSheet, "assets");
+    renderAssetConfigPreview();
+  }
+
+  if (sheetName === "images" && state.images[rowIndex]) {
+    state.selectedImageId = state.images[rowIndex].id;
+    updateSheetActiveRow(elements.imageSheet, "images");
+    renderImageReviewPreview();
+  }
+}
+
 function selectCell(event) {
-  const cell = event.currentTarget;
+  selectSingleCell(event.currentTarget);
+}
+
+function selectSingleCell(cell) {
   const row = Number(cell.dataset.row);
   const col = Number(cell.dataset.col);
   state.selection = {
@@ -666,6 +698,7 @@ function selectCell(event) {
     endCol: col,
   };
   paintSelection();
+  updateSelectedEntityFromCell(cell);
 }
 
 function beginSelection(event) {
@@ -776,33 +809,99 @@ function handleCellKeydown(event) {
   if (cell.classList.contains("is-editing")) {
     if (event.key === "Enter") {
       event.preventDefault();
-      endCellEdit(event);
-      cell.focus();
+      commitEditAndMove(cell, 1, 0);
     }
+    return;
+  }
+
+  if (handleNavigationKey(event, cell)) {
     return;
   }
 
   if (event.key === "Enter") {
     event.preventDefault();
-    enterCellEdit(cell);
+    if (!isCellReadOnly(cell)) {
+      enterCellEdit(cell);
+    }
     return;
   }
 
   if (event.key === "Backspace" || event.key === "Delete") {
     event.preventDefault();
-    replaceSelectedCells("");
+    if (!isCellReadOnly(cell)) {
+      replaceSelectedCells("");
+    }
     return;
   }
 
-  if (isPrintableKey(event)) {
+  if (isPrintableKey(event) && !isCellReadOnly(cell)) {
     event.preventDefault();
     enterCellEdit(cell, event.key);
   }
 }
 
+function handleNavigationKey(event, cell) {
+  const deltas = {
+    ArrowUp: [-1, 0],
+    ArrowDown: [1, 0],
+    ArrowLeft: [0, -1],
+    ArrowRight: [0, 1],
+    Tab: [0, event.shiftKey ? -1 : 1],
+  };
+
+  if (!deltas[event.key]) {
+    return false;
+  }
+
+  event.preventDefault();
+  const [rowDelta, colDelta] = deltas[event.key];
+  focusCell(
+    cell.dataset.sheet,
+    Number(cell.dataset.row) + rowDelta,
+    Number(cell.dataset.col) + colDelta,
+  );
+  return true;
+}
+
+function focusCell(sheetName, rowIndex, colIndex) {
+  const maxRow = state.sheets[sheetName].length - 1;
+  const maxCol = getSheetColumns(sheetName).length - 1;
+  const row = Math.max(0, Math.min(rowIndex, maxRow));
+  const col = Math.max(0, Math.min(colIndex, maxCol));
+  const nextCell = document.querySelector(
+    `.sheet td[data-sheet="${sheetName}"][data-row="${row}"][data-col="${col}"]`,
+  );
+
+  if (!nextCell) {
+    return;
+  }
+
+  closeEditingCell();
+  selectSingleCell(nextCell);
+  nextCell.focus();
+}
+
+function getSheetColumns(sheetName) {
+  return sheetName === "images" ? imageColumns : assetColumns;
+}
+
+function isCellReadOnly(cell) {
+  return cell.dataset.readonly === "true";
+}
+
+function commitEditAndMove(cell, rowDelta, colDelta) {
+  const sheetName = cell.dataset.sheet;
+  const rowIndex = Number(cell.dataset.row);
+  const colIndex = Number(cell.dataset.col);
+  endCellEdit({ currentTarget: cell });
+  focusCell(sheetName, rowIndex + rowDelta, colIndex + colDelta);
+}
+
 function beginCellEdit(event) {
   event.preventDefault();
-  enterCellEdit(event.currentTarget);
+  if (!isCellReadOnly(event.currentTarget)) {
+    enterCellEdit(event.currentTarget);
+  }
 }
 
 function enterCellEdit(cell, replacementText = null) {
@@ -863,7 +962,7 @@ function replaceSelectedCells(value) {
       const cell = document.querySelector(
         `.sheet td[data-sheet="${state.selection.sheet}"][data-row="${row}"][data-col="${col}"]`,
       );
-      if (!cell) {
+      if (!cell || isCellReadOnly(cell)) {
         continue;
       }
       cell.textContent = value;
@@ -927,7 +1026,7 @@ function pasteCells(event) {
 
     cells.forEach((cellText, colOffset) => {
       const targetCol = startCol + colOffset;
-      if (targetCol < columns.length) {
+      if (targetCol < columns.length && !isReadOnlyCell(sheetName, targetCol)) {
         state.sheets[sheetName][targetRow][targetCol] = cellText;
       }
     });
