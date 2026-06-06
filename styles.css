@@ -1,0 +1,377 @@
+:root {
+  color-scheme: light;
+  --ink: #1d2430;
+  --muted: #667085;
+  --line: #d6dce5;
+  --soft-line: #e8edf3;
+  --paper: #fbfcfe;
+  --panel: #ffffff;
+  --brand: #256f6a;
+  --brand-strong: #14514d;
+  --accent: #d05f3f;
+  --focus: #2f73d9;
+  --shadow: 0 18px 50px rgba(31, 45, 61, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 22px;
+}
+
+.workspace {
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.topbar h1,
+.topbar p,
+.section-heading h2,
+.section-heading span,
+.preview-header h2,
+.preview-header p {
+  margin: 0;
+}
+
+.topbar h1 {
+  font-size: 28px;
+  font-weight: 760;
+  line-height: 1.1;
+}
+
+.topbar p,
+.preview-header p,
+.section-heading span,
+.template-card span,
+.drop-zone span {
+  color: var(--muted);
+}
+
+.button {
+  min-height: 40px;
+  border: 1px solid var(--brand);
+  border-radius: 6px;
+  padding: 0 14px;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.button.secondary {
+  background: #fff;
+  color: var(--brand-strong);
+}
+
+.button:disabled {
+  border-color: var(--line);
+  color: #98a2b3;
+  cursor: not-allowed;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.panel,
+.preview-band,
+.sheet-band {
+  background: var(--panel);
+  border: 1px solid var(--soft-line);
+  box-shadow: var(--shadow);
+}
+
+.panel {
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.sidebar {
+  position: sticky;
+  top: 22px;
+}
+
+.drop-zone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 176px;
+  border: 1.5px dashed #a8b4c5;
+  border-radius: 8px;
+  padding: 18px;
+  text-align: center;
+  background: #f7fafc;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.drop-zone:hover,
+.drop-zone.dragging,
+.drop-zone:focus-visible {
+  border-color: var(--focus);
+  background: #eef6ff;
+  outline: none;
+}
+
+.drop-zone input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 0 10px;
+}
+
+.section-heading h2 {
+  font-size: 15px;
+  font-weight: 740;
+}
+
+.section-heading span {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.template-list {
+  display: grid;
+  gap: 8px;
+}
+
+.template-list.empty {
+  min-height: 110px;
+  place-items: center;
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+  padding: 16px;
+}
+
+.template-list.empty p {
+  margin: 0;
+}
+
+.template-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 12px;
+  width: 100%;
+  min-height: 72px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.template-card:hover,
+.template-card.is-selected {
+  border-color: var(--brand);
+}
+
+.template-card strong {
+  overflow-wrap: anywhere;
+}
+
+.template-card .badge {
+  align-self: start;
+  border: 1px solid #f0c2ad;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #fff4ed;
+  color: #9c4221;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.content {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.preview-band,
+.sheet-band {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--soft-line);
+}
+
+.preview-header h2 {
+  font-size: 18px;
+  font-weight: 760;
+  overflow-wrap: anywhere;
+}
+
+.svg-preview {
+  display: grid;
+  min-height: 560px;
+  max-height: calc(100vh - 170px);
+  overflow: auto;
+  place-items: center;
+  padding: 18px;
+  background:
+    linear-gradient(45deg, #f0f3f7 25%, transparent 25%),
+    linear-gradient(-45deg, #f0f3f7 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f0f3f7 75%),
+    linear-gradient(-45deg, transparent 75%, #f0f3f7 75%);
+  background-color: #fff;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-size: 20px 20px;
+}
+
+.svg-preview svg,
+.svg-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(31, 45, 61, 0.18);
+}
+
+.empty-preview {
+  display: grid;
+  width: min(100%, 520px);
+  min-height: 360px;
+  place-items: center;
+  border: 1px dashed #b8c2d0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--muted);
+  font-weight: 680;
+}
+
+.sheet-band {
+  padding: 0 18px 18px;
+}
+
+.sheet-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.sheet {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 14px;
+}
+
+.sheet th,
+.sheet td {
+  height: 34px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet th {
+  background: #f2f5f9;
+  color: #475467;
+  font-weight: 680;
+  text-align: center;
+  user-select: none;
+}
+
+.sheet th:first-child {
+  width: 44px;
+}
+
+.sheet td {
+  background: #fff;
+  outline: none;
+}
+
+.sheet td.is-selected {
+  position: relative;
+  box-shadow: inset 0 0 0 2px var(--focus);
+  z-index: 1;
+}
+
+.sheet td:focus {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    padding: 14px;
+  }
+
+  .topbar,
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+  }
+
+  .svg-preview {
+    min-height: 420px;
+  }
+}

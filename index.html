@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prep2Print</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>Prep2Print</h1>
+            <p>Build print-to-cut projects for card and board games.</p>
+          </div>
+          <button id="exportYamlButton" class="button secondary" type="button" disabled>
+            Export YAML
+          </button>
+        </header>
+
+        <section class="layout">
+          <aside class="panel sidebar">
+            <div
+              id="dropZone"
+              class="drop-zone"
+              tabindex="0"
+              role="button"
+              aria-label="Upload SVG templates"
+            >
+              <input id="fileInput" type="file" accept=".svg,image/svg+xml" multiple />
+              <div class="upload-icon" aria-hidden="true">+</div>
+              <strong>Upload SVG templates</strong>
+              <span>Drop files here or click to browse</span>
+            </div>
+
+            <div class="section-heading">
+              <h2>Templates</h2>
+              <span id="templateCount">0 files</span>
+            </div>
+            <div id="templateList" class="template-list empty">
+              <p>No SVG templates uploaded yet.</p>
+            </div>
+          </aside>
+
+          <section class="content">
+            <section class="preview-band">
+              <div class="preview-header">
+                <div>
+                  <h2 id="previewTitle">No template selected</h2>
+                  <p id="previewMeta">Upload an SVG to inspect the print sheet.</p>
+                </div>
+              </div>
+              <div id="svgPreview" class="svg-preview">
+                <div class="empty-preview">SVG preview</div>
+              </div>
+            </section>
+
+            <section class="sheet-band">
+              <div class="section-heading">
+                <h2>Project Sheet</h2>
+                <span>copy, paste, and edit cells</span>
+              </div>
+              <div class="sheet-wrap" aria-label="Editable project sheet">
+                <table id="projectSheet" class="sheet">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>A</th>
+                      <th>B</th>
+                      <th>C</th>
+                      <th>D</th>
+                      <th>E</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
