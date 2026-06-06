@@ -1,6 +1,4 @@
-const templateColumns = ["File name", "Cards", "Page size", "ViewBox", "Status"];
-const assetColumns = ["File name", "Rows", "Columns", "Images", "Dimensions", "Status"];
-const minimumTemplateRows = 12;
+const assetColumns = ["File Name", "Rows", "Columns", "Images"];
 
 const state = {
   currentStep: "templates",
@@ -10,7 +8,6 @@ const state = {
   selectedAssetId: null,
   confirmedAssets: false,
   sheets: {
-    templates: createSheet(templateColumns, minimumTemplateRows),
     assets: createSheet(assetColumns, 0),
   },
   selection: null,
@@ -28,7 +25,6 @@ const elements = {
   previewTitle: document.querySelector("#previewTitle"),
   previewMeta: document.querySelector("#previewMeta"),
   svgPreview: document.querySelector("#svgPreview"),
-  projectSheet: document.querySelector("#projectSheet"),
   assetFileInput: document.querySelector("#assetFileInput"),
   assetDropZone: document.querySelector("#assetDropZone"),
   assetList: document.querySelector("#assetList"),
@@ -58,7 +54,9 @@ function setStep(step) {
   state.selection = null;
 
   elements.stepViews.forEach((view) => {
-    view.classList.toggle("is-active", view.dataset.step === step);
+    const isActive = view.dataset.step === step;
+    view.classList.toggle("is-active", isActive);
+    view.hidden = !isActive;
   });
 
   elements.stepButtons.forEach((button) => {
@@ -131,7 +129,6 @@ async function handleTemplateFiles(files) {
     try {
       const template = parseSvgFile(file, text);
       state.templates.push(template);
-      upsertTemplateRow(template);
       state.selectedTemplateId = template.id;
     } catch (error) {
       const template = {
@@ -147,29 +144,11 @@ async function handleTemplateFiles(files) {
         error: error.message,
       };
       state.templates.push(template);
-      upsertTemplateRow(template);
       state.selectedTemplateId = template.id;
     }
   }
 
   renderAll();
-}
-
-function upsertTemplateRow(template) {
-  let nextRow = state.sheets.templates.findIndex((row) => row.every((cell) => !cell));
-
-  if (nextRow === -1) {
-    state.sheets.templates.push(Array.from({ length: templateColumns.length }, () => ""));
-    nextRow = state.sheets.templates.length - 1;
-  }
-
-  state.sheets.templates[nextRow] = [
-    template.fileName,
-    String(template.imageCount),
-    [template.width, template.height].filter(Boolean).join(" x "),
-    template.viewBox,
-    template.error ? `Error: ${template.error}` : "Ready",
-  ];
 }
 
 async function handleAssetFiles(files) {
@@ -239,8 +218,6 @@ function syncAssetSheet() {
     String(asset.rows),
     String(asset.columns),
     String(asset.imageCount),
-    asset.width && asset.height ? `${asset.width} x ${asset.height}` : "unknown",
-    asset.status,
   ]);
 }
 
@@ -274,7 +251,6 @@ function renderAll() {
   renderTemplatePreview();
   renderAssetList();
   renderAssetUploadPreview();
-  renderSheet(elements.projectSheet, "templates", templateColumns);
   renderSheet(elements.assetSheet, "assets", assetColumns);
   renderAssetConfigPreview();
 }
@@ -639,7 +615,7 @@ function pasteCells(event) {
 
   event.preventDefault();
   const sheetName = event.currentTarget.dataset.sheet;
-  const columns = sheetName === "assets" ? assetColumns : templateColumns;
+  const columns = assetColumns;
   const startRow = Number(event.currentTarget.dataset.row);
   const startCol = Number(event.currentTarget.dataset.col);
   const rows = text.replace(/\r/g, "").split("\n").filter((row) => row.length);
@@ -647,6 +623,10 @@ function pasteCells(event) {
   rows.forEach((rowText, rowOffset) => {
     const cells = rowText.split("\t");
     const targetRow = startRow + rowOffset;
+
+    if (sheetName === "assets" && targetRow >= state.assets.length) {
+      return;
+    }
 
     while (state.sheets[sheetName].length <= targetRow) {
       state.sheets[sheetName].push(Array.from({ length: columns.length }, () => ""));
@@ -727,7 +707,6 @@ function exportYaml() {
       dataUrl: asset.dataUrl,
     })),
     sheets: {
-      templates: state.sheets.templates,
       assets: state.sheets.assets,
     },
   });
