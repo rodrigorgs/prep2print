@@ -464,20 +464,26 @@ input {
 }
 
 .asset-stage {
+  --asset-ratio: 1;
   position: relative;
-  display: inline-block;
-  max-width: 100%;
-  max-height: calc(100vh - 270px);
+  display: grid;
+  width: min(
+    100%,
+    calc(var(--asset-width) * 1px),
+    calc((100vh - 270px) * var(--asset-ratio))
+  );
+  aspect-ratio: var(--asset-ratio);
   border: 1px solid rgba(37, 111, 106, 0.8);
   overflow: hidden;
 }
 
 .asset-stage-image {
+  grid-area: 1 / 1;
   display: block;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: calc(100vh - 270px);
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
   box-shadow: none;
   object-fit: contain;
 }
@@ -485,6 +491,7 @@ input {
 .asset-grid-overlay {
   --grid-cols: 1;
   --grid-rows: 1;
+  grid-area: 1 / 1;
   position: absolute;
   inset: 0;
   display: grid;

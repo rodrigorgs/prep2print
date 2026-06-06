@@ -400,6 +400,9 @@ function buildAssetGrid(asset) {
   const cols = Math.max(1, asset.columns);
   const rows = Math.max(1, asset.rows);
   const count = Math.min(asset.imageCount, cols * rows);
+  const width = asset.width || 1;
+  const height = asset.height || 1;
+  const ratio = width / height;
   const tiles = [];
 
   for (let index = 0; index < rows * cols; index += 1) {
@@ -410,6 +413,7 @@ function buildAssetGrid(asset) {
   return `
     <div
       class="asset-stage"
+      style="--asset-width: ${width}; --asset-height: ${height}; --asset-ratio: ${ratio};"
       role="img"
       aria-label="${escapeHtml(asset.fileName)} sliced preview"
     >
