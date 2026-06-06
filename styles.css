@@ -419,6 +419,10 @@ input {
   min-width: 420px;
 }
 
+.card-sheet {
+  min-width: 780px;
+}
+
 .asset-sheet th:nth-child(3),
 .asset-sheet th:nth-child(4),
 .asset-sheet th:nth-child(5) {
@@ -460,6 +464,15 @@ input {
   cursor: text;
   user-select: text;
   box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+.sheet-actions {
+  justify-content: flex-start;
+  margin: 0 0 10px;
+}
+
+.sheet-actions .button {
+  flex: none;
 }
 
 .configure-view {
@@ -545,6 +558,75 @@ input {
   margin: 0;
   color: var(--brand-strong);
   font-weight: 720;
+}
+
+.preview-tools {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--soft-line);
+  background: #fff;
+}
+
+.preview-tools .button {
+  min-width: 42px;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.card-preview-viewport {
+  position: relative;
+  cursor: grab;
+  place-items: center;
+}
+
+.card-preview-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.card-preview-canvas {
+  transform-origin: center center;
+  transition: transform 80ms ease;
+}
+
+.card-preview svg {
+  display: block;
+  max-width: min(100%, 900px);
+  max-height: calc(100vh - 300px);
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(31, 45, 61, 0.18);
+}
+
+.autocomplete-menu {
+  position: absolute;
+  z-index: 20;
+  display: grid;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(31, 45, 61, 0.18);
+}
+
+.autocomplete-menu[hidden] {
+  display: none;
+}
+
+.autocomplete-item {
+  border: 0;
+  padding: 7px 10px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item:focus {
+  background: #eef8f5;
+  outline: none;
 }
 
 @media (max-width: 900px) {

@@ -32,6 +32,9 @@
           <button class="step-pill" type="button" data-step-button="review" disabled>
             4. Review Images
           </button>
+          <button class="step-pill" type="button" data-step-button="cards" disabled>
+            5. Create Cards
+          </button>
         </nav>
 
         <section class="layout step-view is-active" data-step="templates">
@@ -198,7 +201,7 @@
                   Back
                 </button>
                 <button id="confirmImagesButton" class="button" type="button" disabled>
-                  Confirm Images
+                  Confirm & Create Cards
                 </button>
               </div>
             </div>
@@ -207,8 +210,62 @@
             </div>
           </section>
         </section>
+
+        <section class="configure-view step-view" data-step="cards" hidden>
+          <section class="sheet-band">
+            <div class="section-heading">
+              <h2>Card Sheet</h2>
+              <span>map fronts, backs, quantities, templates, and placeholders</span>
+            </div>
+            <div class="button-row compact sheet-actions">
+              <button id="addCardButton" class="button secondary" type="button">
+                Add Row
+              </button>
+              <button id="removeCardButton" class="button secondary" type="button" disabled>
+                Remove Row
+              </button>
+            </div>
+            <div class="sheet-wrap" aria-label="Editable card sheet">
+              <table id="cardSheet" class="sheet card-sheet">
+                <thead>
+                  <tr>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="preview-band">
+            <div class="preview-header">
+              <div>
+                <h2 id="cardPreviewTitle">No card selected</h2>
+                <p id="cardPreviewMeta">Select a card row to preview it on a print template.</p>
+              </div>
+              <div class="button-row compact">
+                <button class="button secondary" type="button" data-step-button="review">
+                  Back
+                </button>
+              </div>
+            </div>
+            <div class="preview-tools">
+              <button id="zoomOutButton" class="button secondary" type="button">-</button>
+              <button id="zoomResetButton" class="button secondary" type="button">100%</button>
+              <button id="zoomInButton" class="button secondary" type="button">+</button>
+            </div>
+            <div id="cardPreviewViewport" class="svg-preview card-preview-viewport">
+              <div id="cardPreviewCanvas" class="card-preview-canvas">
+                <div id="cardPreview" class="card-preview">
+                  <div class="empty-preview">Card template preview</div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
       </section>
     </main>
+    <div id="autocompleteMenu" class="autocomplete-menu" hidden></div>
     <script src="app.js"></script>
   </body>
 </html>

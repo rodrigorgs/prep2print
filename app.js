@@ -1,5 +1,6 @@
 const assetColumns = ["File Name", "Rows", "Columns", "Images"];
 const imageColumns = ["Asset", "Index", "Alias"];
+const cardColumns = ["Front", "Back", "Quantity", "Template", "Placeholder"];
 
 const state = {
   currentStep: "templates",
@@ -9,15 +10,28 @@ const state = {
   selectedAssetId: null,
   images: [],
   selectedImageId: null,
+  cards: [],
+  selectedCardId: null,
   confirmedAssets: false,
   confirmedImages: false,
+  confirmedCards: false,
   sheets: {
     assets: createSheet(assetColumns, 0),
     images: createSheet(imageColumns, 0),
+    cards: createSheet(cardColumns, 0),
   },
   selection: null,
   isSelecting: false,
   editingCell: null,
+  autocompleteCell: null,
+  cardPreview: {
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    dragging: false,
+    startX: 0,
+    startY: 0,
+  },
 };
 
 const elements = {
@@ -49,6 +63,18 @@ const elements = {
   imageReviewMeta: document.querySelector("#imageReviewMeta"),
   imageReviewPreview: document.querySelector("#imageReviewPreview"),
   confirmImagesButton: document.querySelector("#confirmImagesButton"),
+  cardSheet: document.querySelector("#cardSheet"),
+  addCardButton: document.querySelector("#addCardButton"),
+  removeCardButton: document.querySelector("#removeCardButton"),
+  cardPreviewTitle: document.querySelector("#cardPreviewTitle"),
+  cardPreviewMeta: document.querySelector("#cardPreviewMeta"),
+  cardPreviewViewport: document.querySelector("#cardPreviewViewport"),
+  cardPreviewCanvas: document.querySelector("#cardPreviewCanvas"),
+  cardPreview: document.querySelector("#cardPreview"),
+  zoomOutButton: document.querySelector("#zoomOutButton"),
+  zoomResetButton: document.querySelector("#zoomResetButton"),
+  zoomInButton: document.querySelector("#zoomInButton"),
+  autocompleteMenu: document.querySelector("#autocompleteMenu"),
   exportYamlButton: document.querySelector("#exportYamlButton"),
 };
 
@@ -87,7 +113,10 @@ function canOpenStep(step) {
   if (step === "configure") {
     return state.assets.length > 0;
   }
-  return state.confirmedAssets && state.images.length > 0;
+  if (step === "review") {
+    return state.confirmedAssets && state.images.length > 0;
+  }
+  return state.confirmedImages && state.cards.length > 0;
 }
 
 function updateStepAvailability() {
@@ -99,6 +128,7 @@ function updateStepAvailability() {
   elements.continueToConfigureButton.disabled = state.assets.length === 0;
   elements.confirmAssetsButton.disabled = state.assets.length === 0;
   elements.confirmImagesButton.disabled = state.images.length === 0;
+  elements.removeCardButton.disabled = !state.selectedCardId;
   elements.exportYamlButton.disabled = state.templates.length === 0 && state.assets.length === 0;
 }
 
@@ -120,18 +150,34 @@ function parseSvgFile(file, text) {
   const width = svg.getAttribute("width") || "";
   const height = svg.getAttribute("height") || "";
   const viewBox = svg.getAttribute("viewBox") || "";
+  const alias = stripExtension(file.name);
 
   return {
     id: crypto.randomUUID(),
+    alias,
     fileName: file.name,
     size: file.size,
     uploadedAt: new Date().toISOString(),
     imageCount: images.length,
+    placeholders: images.map((image, index) => getPlaceholderName(image, index)),
     width,
     height,
     viewBox,
     svgText: text,
   };
+}
+
+function getPlaceholderName(image, index) {
+  const label =
+    image.getAttribute("id") ||
+    image.getAttribute("inkscape:label") ||
+    image.getAttributeNS("http://www.inkscape.org/namespaces/inkscape", "label") ||
+    image.getAttribute("href") ||
+    image.getAttribute("xlink:href") ||
+    image.getAttributeNS("http://www.w3.org/1999/xlink", "href") ||
+    "";
+  const clean = label.split("/").pop().replace(/\.[^.]+$/, "").trim();
+  return clean || `image_${String(index + 1).padStart(2, "0")}`;
 }
 
 async function handleTemplateFiles(files) {
@@ -148,10 +194,12 @@ async function handleTemplateFiles(files) {
     } catch (error) {
       const template = {
         id: crypto.randomUUID(),
+        alias: stripExtension(file.name),
         fileName: file.name,
         size: file.size,
         uploadedAt: new Date().toISOString(),
         imageCount: 0,
+        placeholders: [],
         width: "",
         height: "",
         viewBox: "",
@@ -307,6 +355,68 @@ function syncImageFromSheet(rowIndex) {
   row[2] = image.alias;
 }
 
+function syncCardsFromImages() {
+  const existingByImageId = new Map(state.cards.map((card) => [card.imageId, card]));
+  const defaultTemplate = getDefaultTemplateAlias();
+  const defaultPlaceholder = getDefaultPlaceholder(defaultTemplate);
+
+  state.cards = state.images.map((image) => {
+    const existing = existingByImageId.get(image.id);
+    return {
+      id: existing?.id || crypto.randomUUID(),
+      imageId: image.id,
+      frontAlias: image.alias,
+      backAlias: existing?.backAlias || "",
+      quantity: existing?.quantity || 1,
+      templateAlias: existing?.templateAlias || defaultTemplate,
+      placeholderName: existing?.placeholderName || defaultPlaceholder,
+    };
+  });
+
+  state.selectedCardId =
+    state.cards.find((card) => card.id === state.selectedCardId)?.id ||
+    state.cards[0]?.id ||
+    null;
+  syncCardSheet();
+}
+
+function syncCardSheet() {
+  state.sheets.cards = state.cards.map((card) => [
+    card.frontAlias,
+    card.backAlias,
+    String(card.quantity),
+    card.templateAlias,
+    card.placeholderName,
+  ]);
+}
+
+function syncCardFromSheet(rowIndex) {
+  const card = state.cards[rowIndex];
+  if (!card) {
+    return;
+  }
+
+  const row = state.sheets.cards[rowIndex];
+  card.frontAlias = row[0] || "";
+  card.imageId = getImageByAlias(card.frontAlias)?.id || card.imageId || "";
+  card.backAlias = row[1] || "";
+  card.quantity = clampPositiveInteger(row[2], 1);
+  card.templateAlias = row[3] || getDefaultTemplateAlias();
+  card.placeholderName = row[4] || getDefaultPlaceholder(card.templateAlias);
+  row[2] = String(card.quantity);
+  row[3] = card.templateAlias;
+  row[4] = card.placeholderName;
+}
+
+function getDefaultTemplateAlias() {
+  return state.templates[0]?.alias || "";
+}
+
+function getDefaultPlaceholder(templateAlias) {
+  const template = getTemplateByAlias(templateAlias) || state.templates[0];
+  return template?.placeholders?.[0] || "";
+}
+
 function defaultImageAlias(image) {
   return `${stripExtension(image.assetFileName)}_${String(image.index + 1).padStart(2, "0")}`;
 }
@@ -333,6 +443,8 @@ function renderAll() {
   renderAssetConfigPreview();
   renderSheet(elements.imageSheet, "images", imageColumns);
   renderImageReviewPreview();
+  renderSheet(elements.cardSheet, "cards", cardColumns);
+  renderCardPreview();
 }
 
 function renderTemplates() {
@@ -557,10 +669,141 @@ function getAssetForImage(image) {
   return state.assets.find((asset) => asset.id === image.assetId);
 }
 
+async function renderCardPreview() {
+  const selected = getSelectedCard();
+
+  if (!selected) {
+    elements.cardPreviewTitle.textContent = "No card selected";
+    elements.cardPreviewMeta.textContent = "Select a card row to preview it on a print template.";
+    elements.cardPreview.innerHTML = '<div class="empty-preview">Card template preview</div>';
+    applyCardPreviewTransform();
+    return;
+  }
+
+  elements.cardPreviewTitle.textContent = selected.frontAlias || "Untitled card";
+  elements.cardPreviewMeta.textContent = `${selected.quantity} copies · ${
+    selected.templateAlias || "no template"
+  } · ${selected.placeholderName || "no placeholder"}`;
+
+  try {
+    elements.cardPreview.innerHTML = await buildCardTemplatePreview(selected);
+    const svg = elements.cardPreview.querySelector("svg");
+    if (svg) {
+      svg.removeAttribute("width");
+      svg.removeAttribute("height");
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", `${selected.frontAlias} card preview`);
+    }
+  } catch (error) {
+    elements.cardPreview.innerHTML = `<div class="empty-preview">${escapeHtml(
+      error.message,
+    )}</div>`;
+  }
+
+  applyCardPreviewTransform();
+}
+
+async function buildCardTemplatePreview(card) {
+  const template = getTemplateByAlias(card.templateAlias);
+  const frontImage = getImageByAlias(card.frontAlias);
+
+  if (!template) {
+    throw new Error("Template alias not found.");
+  }
+  if (!frontImage) {
+    throw new Error("Front image alias not found.");
+  }
+
+  const imageDataUrl = await getImageSliceDataUrl(frontImage);
+  const parser = new DOMParser();
+  const documentSvg = parser.parseFromString(template.svgText, "image/svg+xml");
+  const svg = documentSvg.querySelector("svg");
+  if (!svg) {
+    throw new Error("The selected template is not a valid SVG.");
+  }
+
+  removeUnsafeSvgContent(documentSvg);
+
+  const imageNodes = Array.from(svg.querySelectorAll("image"));
+  const matchingNodes = imageNodes.filter(
+    (image, index) => getPlaceholderName(image, index) === card.placeholderName,
+  );
+  if (!matchingNodes.length) {
+    throw new Error("Placeholder not found in selected template.");
+  }
+
+  matchingNodes.slice(0, card.quantity).forEach((image) => {
+    image.setAttribute("href", imageDataUrl);
+    image.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imageDataUrl);
+  });
+
+  return new XMLSerializer().serializeToString(svg);
+}
+
+function getSelectedCard() {
+  return state.cards.find((card) => card.id === state.selectedCardId);
+}
+
+function getImageByAlias(alias) {
+  return state.images.find((image) => image.alias === alias);
+}
+
+function getTemplateByAlias(alias) {
+  return state.templates.find((template) => template.alias === alias);
+}
+
+async function getImageSliceDataUrl(image) {
+  if (image.sliceDataUrl) {
+    return image.sliceDataUrl;
+  }
+
+  const asset = getAssetForImage(image);
+  if (!asset) {
+    throw new Error("Asset for front image not found.");
+  }
+
+  const cols = Math.max(1, asset.columns);
+  const rows = Math.max(1, asset.rows);
+  const source = await loadImageElement(asset.objectUrl);
+  const tileWidth = asset.width / cols;
+  const tileHeight = asset.height / rows;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(tileWidth));
+  canvas.height = Math.max(1, Math.round(tileHeight));
+  const context = canvas.getContext("2d");
+  context.drawImage(
+    source,
+    image.col * tileWidth,
+    image.row * tileHeight,
+    tileWidth,
+    tileHeight,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  image.sliceDataUrl = canvas.toDataURL("image/png");
+  return image.sliceDataUrl;
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener("load", () => resolve(image));
+    image.addEventListener("error", () => reject(new Error("The image slice could not be loaded.")));
+    image.src = src;
+  });
+}
+
 function sanitizeSvgForPreview(svgText) {
   const parser = new DOMParser();
   const documentSvg = parser.parseFromString(svgText, "image/svg+xml");
+  removeUnsafeSvgContent(documentSvg);
 
+  return new XMLSerializer().serializeToString(documentSvg.documentElement);
+}
+
+function removeUnsafeSvgContent(documentSvg) {
   for (const tagName of ["script", "foreignObject"]) {
     for (const node of documentSvg.querySelectorAll(tagName)) {
       node.remove();
@@ -574,8 +817,6 @@ function sanitizeSvgForPreview(svgText) {
       }
     }
   }
-
-  return new XMLSerializer().serializeToString(documentSvg.documentElement);
 }
 
 function renderSheet(table, sheetName, columns) {
@@ -589,6 +830,9 @@ function renderSheet(table, sheetName, columns) {
       tr.classList.add("is-active-row");
     }
     if (sheetName === "images" && state.images[rowIndex]?.id === state.selectedImageId) {
+      tr.classList.add("is-active-row");
+    }
+    if (sheetName === "cards" && state.cards[rowIndex]?.id === state.selectedCardId) {
       tr.classList.add("is-active-row");
     }
 
@@ -653,6 +897,13 @@ function handleCellClick(event) {
     updateSheetActiveRow(elements.imageSheet, "images");
     renderImageReviewPreview();
   }
+
+  if (sheetName === "cards" && state.cards[rowIndex]) {
+    state.selectedCardId = state.cards[rowIndex].id;
+    elements.removeCardButton.disabled = false;
+    updateSheetActiveRow(elements.cardSheet, "cards");
+    renderCardPreview();
+  }
 }
 
 function updateSheetActiveRow(table, sheetName) {
@@ -660,7 +911,9 @@ function updateSheetActiveRow(table, sheetName) {
     const isActive =
       sheetName === "assets"
         ? state.assets[index]?.id === state.selectedAssetId
-        : state.images[index]?.id === state.selectedImageId;
+        : sheetName === "images"
+          ? state.images[index]?.id === state.selectedImageId
+          : state.cards[index]?.id === state.selectedCardId;
     row.classList.toggle("is-active-row", isActive);
   });
 }
@@ -680,6 +933,12 @@ function updateSelectedEntityFromCell(cell) {
     state.selectedImageId = state.images[rowIndex].id;
     updateSheetActiveRow(elements.imageSheet, "images");
     renderImageReviewPreview();
+  }
+
+  if (sheetName === "cards" && state.cards[rowIndex]) {
+    state.selectedCardId = state.cards[rowIndex].id;
+    updateSheetActiveRow(elements.cardSheet, "cards");
+    renderCardPreview();
   }
 }
 
@@ -780,6 +1039,7 @@ function normalizeSelection(selection) {
 
 function updateCell(event) {
   syncCellValue(event.currentTarget);
+  updateAutocomplete(event.currentTarget);
 }
 
 function syncCellValue(cell) {
@@ -800,6 +1060,12 @@ function syncCellValue(cell) {
     state.confirmedImages = false;
     syncImageFromSheet(rowIndex);
     renderImageReviewPreview();
+  }
+
+  if (sheetName === "cards") {
+    state.confirmedCards = false;
+    syncCardFromSheet(rowIndex);
+    renderCardPreview();
   }
 }
 
@@ -882,7 +1148,13 @@ function focusCell(sheetName, rowIndex, colIndex) {
 }
 
 function getSheetColumns(sheetName) {
-  return sheetName === "images" ? imageColumns : assetColumns;
+  if (sheetName === "images") {
+    return imageColumns;
+  }
+  if (sheetName === "cards") {
+    return cardColumns;
+  }
+  return assetColumns;
 }
 
 function isCellReadOnly(cell) {
@@ -909,6 +1181,7 @@ function enterCellEdit(cell, replacementText = null) {
   state.editingCell = cell;
   cell.contentEditable = "true";
   cell.classList.add("is-editing");
+  state.autocompleteCell = cell;
 
   if (replacementText !== null) {
     cell.textContent = replacementText;
@@ -917,6 +1190,7 @@ function enterCellEdit(cell, replacementText = null) {
 
   cell.focus();
   moveCaretToEnd(cell);
+  updateAutocomplete(cell);
 }
 
 function endCellEdit(event) {
@@ -933,6 +1207,7 @@ function endCellEdit(event) {
   cell.contentEditable = "false";
   cell.classList.remove("is-editing");
   state.editingCell = null;
+  hideAutocomplete();
 }
 
 function closeEditingCell() {
@@ -949,6 +1224,7 @@ function closeEditingCell() {
   cell.contentEditable = "false";
   cell.classList.remove("is-editing");
   state.editingCell = null;
+  hideAutocomplete();
 }
 
 function replaceSelectedCells(value) {
@@ -984,6 +1260,111 @@ function moveCaretToEnd(element) {
   selection.addRange(range);
 }
 
+function updateAutocomplete(cell) {
+  const options = getAutocompleteOptions(cell);
+  if (!options.length || !cell.classList.contains("is-editing")) {
+    hideAutocomplete();
+    return;
+  }
+
+  const value = cell.textContent.trim().toLowerCase();
+  const matches = options
+    .filter((option) => option.toLowerCase().includes(value))
+    .slice(0, 8);
+
+  if (!matches.length) {
+    hideAutocomplete();
+    return;
+  }
+
+  const rect = cell.getBoundingClientRect();
+  elements.autocompleteMenu.innerHTML = "";
+  for (const match of matches) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "autocomplete-item";
+    button.textContent = match;
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      cell.textContent = match;
+      syncCellValue(cell);
+      moveCaretToEnd(cell);
+      hideAutocomplete();
+    });
+    elements.autocompleteMenu.append(button);
+  }
+
+  elements.autocompleteMenu.hidden = false;
+  elements.autocompleteMenu.style.left = `${rect.left + window.scrollX}px`;
+  elements.autocompleteMenu.style.top = `${rect.bottom + window.scrollY + 3}px`;
+  elements.autocompleteMenu.style.minWidth = `${rect.width}px`;
+}
+
+function getAutocompleteOptions(cell) {
+  if (cell.dataset.sheet !== "cards") {
+    return [];
+  }
+
+  const col = Number(cell.dataset.col);
+  if (col === 0 || col === 1) {
+    return state.images.map((image) => image.alias);
+  }
+  if (col === 3) {
+    return state.templates.map((template) => template.alias);
+  }
+  if (col === 4) {
+    const row = state.sheets.cards[Number(cell.dataset.row)];
+    const template = getTemplateByAlias(row?.[3]);
+    return template?.placeholders || [];
+  }
+  return [];
+}
+
+function hideAutocomplete() {
+  elements.autocompleteMenu.hidden = true;
+  elements.autocompleteMenu.innerHTML = "";
+  state.autocompleteCell = null;
+}
+
+function setCardPreviewZoom(nextZoom) {
+  state.cardPreview.zoom = Math.max(0.25, Math.min(4, nextZoom));
+  applyCardPreviewTransform();
+}
+
+function resetCardPreviewTransform() {
+  state.cardPreview.zoom = 1;
+  state.cardPreview.panX = 0;
+  state.cardPreview.panY = 0;
+  applyCardPreviewTransform();
+}
+
+function applyCardPreviewTransform() {
+  elements.cardPreviewCanvas.style.transform = `translate(${state.cardPreview.panX}px, ${state.cardPreview.panY}px) scale(${state.cardPreview.zoom})`;
+  elements.zoomResetButton.textContent = `${Math.round(state.cardPreview.zoom * 100)}%`;
+}
+
+function startCardPreviewPan(event) {
+  state.cardPreview.dragging = true;
+  state.cardPreview.startX = event.clientX - state.cardPreview.panX;
+  state.cardPreview.startY = event.clientY - state.cardPreview.panY;
+  elements.cardPreviewViewport.classList.add("is-panning");
+}
+
+function moveCardPreviewPan(event) {
+  if (!state.cardPreview.dragging) {
+    return;
+  }
+
+  state.cardPreview.panX = event.clientX - state.cardPreview.startX;
+  state.cardPreview.panY = event.clientY - state.cardPreview.startY;
+  applyCardPreviewTransform();
+}
+
+function endCardPreviewPan() {
+  state.cardPreview.dragging = false;
+  elements.cardPreviewViewport.classList.remove("is-panning");
+}
+
 function pasteCells(event) {
   if (event.defaultPrevented) {
     return;
@@ -1004,7 +1385,7 @@ function pasteCells(event) {
 
   event.preventDefault();
   const sheetName = target.dataset.sheet;
-  const columns = sheetName === "images" ? imageColumns : assetColumns;
+  const columns = getSheetColumns(sheetName);
   const startRow = Number(target.dataset.row);
   const startCol = Number(target.dataset.col);
   const rows = text.replace(/\r/g, "").split("\n").filter((row) => row.length);
@@ -1017,6 +1398,9 @@ function pasteCells(event) {
       return;
     }
     if (sheetName === "images" && targetRow >= state.images.length) {
+      return;
+    }
+    if (sheetName === "cards" && targetRow >= state.cards.length) {
       return;
     }
 
@@ -1039,6 +1423,10 @@ function pasteCells(event) {
     if (sheetName === "images") {
       state.confirmedImages = false;
       syncImageFromSheet(targetRow);
+    }
+    if (sheetName === "cards") {
+      state.confirmedCards = false;
+      syncCardFromSheet(targetRow);
     }
   });
 
@@ -1078,7 +1466,42 @@ function confirmAssets() {
 
 function confirmImages() {
   state.confirmedImages = true;
-  renderImageReviewPreview();
+  state.confirmedCards = false;
+  syncCardsFromImages();
+  setStep("cards");
+}
+
+function addCardRow() {
+  const defaultTemplate = getDefaultTemplateAlias();
+  const card = {
+    id: crypto.randomUUID(),
+    imageId: "",
+    frontAlias: state.images[0]?.alias || "",
+    backAlias: "",
+    quantity: 1,
+    templateAlias: defaultTemplate,
+    placeholderName: getDefaultPlaceholder(defaultTemplate),
+  };
+
+  state.cards.push(card);
+  state.selectedCardId = card.id;
+  state.confirmedCards = false;
+  syncCardSheet();
+  renderAll();
+  focusCell("cards", state.cards.length - 1, 0);
+}
+
+function removeSelectedCardRow() {
+  const index = state.cards.findIndex((card) => card.id === state.selectedCardId);
+  if (index === -1) {
+    return;
+  }
+
+  state.cards.splice(index, 1);
+  state.selectedCardId = state.cards[Math.min(index, state.cards.length - 1)]?.id || null;
+  state.confirmedCards = false;
+  syncCardSheet();
+  renderAll();
 }
 
 function exportYaml() {
@@ -1089,10 +1512,13 @@ function exportYaml() {
     currentStep: state.currentStep,
     confirmedAssets: state.confirmedAssets,
     confirmedImages: state.confirmedImages,
+    confirmedCards: state.confirmedCards,
     templates: state.templates.map((template) => ({
+      alias: template.alias,
       fileName: template.fileName,
       size: template.size,
       imageCount: template.imageCount,
+      placeholders: template.placeholders,
       width: template.width,
       height: template.height,
       viewBox: template.viewBox,
@@ -1119,9 +1545,17 @@ function exportYaml() {
       row: image.row + 1,
       column: image.col + 1,
     })),
+    cards: state.cards.map((card) => ({
+      frontAlias: card.frontAlias,
+      backAlias: card.backAlias,
+      quantity: card.quantity,
+      templateAlias: card.templateAlias,
+      placeholderName: card.placeholderName,
+    })),
     sheets: {
       assets: state.sheets.assets,
       images: state.sheets.images,
+      cards: state.sheets.cards,
     },
   });
   downloadFile("prep2print-project.yaml", yaml, "application/x-yaml");
@@ -1252,6 +1686,14 @@ elements.continueToAssetsButton.addEventListener("click", () => setStep("assets"
 elements.continueToConfigureButton.addEventListener("click", () => setStep("configure"));
 elements.confirmAssetsButton.addEventListener("click", confirmAssets);
 elements.confirmImagesButton.addEventListener("click", confirmImages);
+elements.addCardButton.addEventListener("click", addCardRow);
+elements.removeCardButton.addEventListener("click", removeSelectedCardRow);
+elements.zoomOutButton.addEventListener("click", () => setCardPreviewZoom(state.cardPreview.zoom - 0.1));
+elements.zoomResetButton.addEventListener("click", resetCardPreviewTransform);
+elements.zoomInButton.addEventListener("click", () => setCardPreviewZoom(state.cardPreview.zoom + 0.1));
+elements.cardPreviewViewport.addEventListener("mousedown", startCardPreviewPan);
+document.addEventListener("mousemove", moveCardPreviewPan);
+document.addEventListener("mouseup", endCardPreviewPan);
 elements.exportYamlButton.addEventListener("click", exportYaml);
 document.addEventListener("mouseup", endSelection);
 document.addEventListener("copy", copySelection);
