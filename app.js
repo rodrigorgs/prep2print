@@ -728,11 +728,9 @@ async function buildCardTemplatePreview(card) {
   const matchingNodes = imageNodes.filter(
     (image, index) => getPlaceholderName(image, index) === card.placeholderName,
   );
-  if (!matchingNodes.length) {
-    throw new Error("Placeholder not found in selected template.");
-  }
+  const targets = matchingNodes.length ? matchingNodes : imageNodes;
 
-  matchingNodes.slice(0, card.quantity).forEach((image) => {
+  targets.slice(0, card.quantity).forEach((image) => {
     image.setAttribute("href", imageDataUrl);
     image.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imageDataUrl);
   });
@@ -765,8 +763,10 @@ async function getImageSliceDataUrl(image) {
   const cols = Math.max(1, asset.columns);
   const rows = Math.max(1, asset.rows);
   const source = await loadImageElement(asset.objectUrl);
-  const tileWidth = asset.width / cols;
-  const tileHeight = asset.height / rows;
+  const sourceWidth = asset.width || source.naturalWidth || source.width || 1;
+  const sourceHeight = asset.height || source.naturalHeight || source.height || 1;
+  const tileWidth = sourceWidth / cols;
+  const tileHeight = sourceHeight / rows;
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(tileWidth));
   canvas.height = Math.max(1, Math.round(tileHeight));

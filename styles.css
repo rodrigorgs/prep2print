@@ -592,7 +592,9 @@ input {
 
 .card-preview svg {
   display: block;
-  max-width: min(100%, 900px);
+  width: min(100%, 900px);
+  height: auto;
+  max-width: 100%;
   max-height: calc(100vh - 300px);
   background: #fff;
   box-shadow: 0 8px 30px rgba(31, 45, 61, 0.18);
