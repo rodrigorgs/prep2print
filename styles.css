@@ -348,7 +348,7 @@ input {
 
 .svg-preview svg,
 .svg-preview img,
-.asset-grid {
+.asset-stage {
   display: block;
   max-width: 100%;
   max-height: 100%;
@@ -423,7 +423,9 @@ input {
 
 .sheet td {
   background: #fff;
+  cursor: cell;
   outline: none;
+  user-select: none;
 }
 
 .sheet tr.is-active-row td,
@@ -441,6 +443,12 @@ input {
   box-shadow: inset 0 0 0 2px var(--focus);
 }
 
+.sheet td.is-editing {
+  cursor: text;
+  user-select: text;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
 .configure-view {
   grid-template-columns: minmax(340px, 460px) minmax(0, 1fr);
   gap: 18px;
@@ -455,16 +463,34 @@ input {
   min-height: calc(100vh - 210px);
 }
 
-.asset-grid {
+.asset-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: calc(100vh - 270px);
+  border: 1px solid rgba(37, 111, 106, 0.8);
+  overflow: hidden;
+}
+
+.asset-stage-image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 270px);
+  box-shadow: none;
+  object-fit: contain;
+}
+
+.asset-grid-overlay {
   --grid-cols: 1;
   --grid-rows: 1;
+  position: absolute;
+  inset: 0;
   display: grid;
   grid-template-columns: repeat(var(--grid-cols), 1fr);
   grid-template-rows: repeat(var(--grid-rows), 1fr);
-  width: min(100%, var(--preview-width, 900px));
-  aspect-ratio: var(--asset-ratio, 1);
-  border: 1px solid rgba(37, 111, 106, 0.8);
-  overflow: hidden;
+  pointer-events: none;
 }
 
 .asset-tile {
@@ -472,10 +498,6 @@ input {
   min-height: 0;
   border-right: 1px solid rgba(37, 111, 106, 0.8);
   border-bottom: 1px solid rgba(37, 111, 106, 0.8);
-  background-image: var(--asset-image);
-  background-repeat: no-repeat;
-  background-size: calc(var(--grid-cols) * 100%) calc(var(--grid-rows) * 100%);
-  background-position: var(--tile-x) var(--tile-y);
 }
 
 .asset-tile.is-hidden {

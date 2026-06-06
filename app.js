@@ -12,6 +12,7 @@ const state = {
   },
   selection: null,
   isSelecting: false,
+  editingCell: null,
 };
 
 const elements = {
@@ -399,28 +400,23 @@ function buildAssetGrid(asset) {
   const cols = Math.max(1, asset.columns);
   const rows = Math.max(1, asset.rows);
   const count = Math.min(asset.imageCount, cols * rows);
-  const ratio = asset.width && asset.height ? asset.width / asset.height : 1;
   const tiles = [];
 
   for (let index = 0; index < rows * cols; index += 1) {
-    const col = index % cols;
-    const row = Math.floor(index / cols);
-    const x = cols === 1 ? "0%" : `${(col / (cols - 1)) * 100}%`;
-    const y = rows === 1 ? "0%" : `${(row / (rows - 1)) * 100}%`;
     const hiddenClass = index >= count ? " is-hidden" : "";
-    tiles.push(
-      `<div class="asset-tile${hiddenClass}" style="--tile-x: ${x}; --tile-y: ${y};"></div>`,
-    );
+    tiles.push(`<div class="asset-tile${hiddenClass}"></div>`);
   }
 
   return `
     <div
-      class="asset-grid"
-      style="--grid-cols: ${cols}; --grid-rows: ${rows}; --asset-ratio: ${ratio}; --asset-image: url('${asset.objectUrl.replace(/'/g, "%27")}');"
+      class="asset-stage"
       role="img"
       aria-label="${escapeHtml(asset.fileName)} sliced preview"
     >
-      ${tiles.join("")}
+      <img class="asset-stage-image" alt="" src="${asset.objectUrl}" />
+      <div class="asset-grid-overlay" style="--grid-cols: ${cols}; --grid-rows: ${rows};">
+        ${tiles.join("")}
+      </div>
     </div>
   `;
 }
@@ -467,7 +463,8 @@ function renderSheet(table, sheetName, columns) {
 
     columns.forEach((_, colIndex) => {
       const td = document.createElement("td");
-      td.contentEditable = sheetName === "assets" ? String(colIndex <= 3) : "true";
+      td.contentEditable = "false";
+      td.tabIndex = 0;
       td.spellcheck = false;
       td.dataset.sheet = sheetName;
       td.dataset.row = String(rowIndex);
@@ -476,6 +473,9 @@ function renderSheet(table, sheetName, columns) {
       td.addEventListener("focus", selectCell);
       td.addEventListener("mousedown", beginSelection);
       td.addEventListener("mouseenter", extendSelection);
+      td.addEventListener("keydown", handleCellKeydown);
+      td.addEventListener("dblclick", beginCellEdit);
+      td.addEventListener("blur", endCellEdit);
       td.addEventListener("input", updateCell);
       td.addEventListener("paste", pasteCells);
       td.addEventListener("click", handleCellClick);
@@ -504,9 +504,18 @@ function handleCellClick(event) {
   if (sheetName === "assets" && state.assets[rowIndex]) {
     state.selectedAssetId = state.assets[rowIndex].id;
     renderAssetList();
-    renderSheet(elements.assetSheet, "assets", assetColumns);
+    updateAssetSheetActiveRow();
     renderAssetConfigPreview();
   }
+}
+
+function updateAssetSheetActiveRow() {
+  elements.assetSheet.querySelectorAll("tbody tr").forEach((row, index) => {
+    row.classList.toggle(
+      "is-active-row",
+      state.assets[index]?.id === state.selectedAssetId,
+    );
+  });
 }
 
 function selectCell(event) {
@@ -525,6 +534,13 @@ function selectCell(event) {
 
 function beginSelection(event) {
   const cell = event.currentTarget;
+  if (cell.classList.contains("is-editing")) {
+    return;
+  }
+
+  event.preventDefault();
+  closeEditingCell();
+
   const row = Number(cell.dataset.row);
   const col = Number(cell.dataset.col);
 
@@ -544,6 +560,7 @@ function beginSelection(event) {
   }
 
   paintSelection();
+  cell.focus();
 }
 
 function extendSelection(event) {
@@ -593,7 +610,10 @@ function normalizeSelection(selection) {
 }
 
 function updateCell(event) {
-  const cell = event.currentTarget;
+  syncCellValue(event.currentTarget);
+}
+
+function syncCellValue(cell) {
   const sheetName = cell.dataset.sheet;
   const rowIndex = Number(cell.dataset.row);
   const colIndex = Number(cell.dataset.col);
@@ -607,17 +627,144 @@ function updateCell(event) {
   }
 }
 
+function handleCellKeydown(event) {
+  const cell = event.currentTarget;
+
+  if (cell.classList.contains("is-editing")) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      endCellEdit(event);
+      cell.focus();
+    }
+    return;
+  }
+
+  if (event.key === "Enter") {
+    event.preventDefault();
+    enterCellEdit(cell);
+    return;
+  }
+
+  if (event.key === "Backspace" || event.key === "Delete") {
+    event.preventDefault();
+    replaceSelectedCells("");
+    return;
+  }
+
+  if (isPrintableKey(event)) {
+    event.preventDefault();
+    enterCellEdit(cell, event.key);
+  }
+}
+
+function beginCellEdit(event) {
+  event.preventDefault();
+  enterCellEdit(event.currentTarget);
+}
+
+function enterCellEdit(cell, replacementText = null) {
+  closeEditingCell();
+  state.editingCell = cell;
+  cell.contentEditable = "true";
+  cell.classList.add("is-editing");
+
+  if (replacementText !== null) {
+    cell.textContent = replacementText;
+    syncCellValue(cell);
+  }
+
+  cell.focus();
+  moveCaretToEnd(cell);
+}
+
+function endCellEdit(event) {
+  const cell = event.currentTarget;
+  if (!cell.classList.contains("is-editing")) {
+    return;
+  }
+
+  syncCellValue(cell);
+  const row = state.sheets[cell.dataset.sheet]?.[Number(cell.dataset.row)];
+  if (row) {
+    cell.textContent = row[Number(cell.dataset.col)] ?? "";
+  }
+  cell.contentEditable = "false";
+  cell.classList.remove("is-editing");
+  state.editingCell = null;
+}
+
+function closeEditingCell() {
+  if (!state.editingCell) {
+    return;
+  }
+
+  const cell = state.editingCell;
+  syncCellValue(cell);
+  const row = state.sheets[cell.dataset.sheet]?.[Number(cell.dataset.row)];
+  if (row) {
+    cell.textContent = row[Number(cell.dataset.col)] ?? "";
+  }
+  cell.contentEditable = "false";
+  cell.classList.remove("is-editing");
+  state.editingCell = null;
+}
+
+function replaceSelectedCells(value) {
+  if (!state.selection) {
+    return;
+  }
+
+  const range = normalizeSelection(state.selection);
+  for (let row = range.startRow; row <= range.endRow; row += 1) {
+    for (let col = range.startCol; col <= range.endCol; col += 1) {
+      const cell = document.querySelector(
+        `.sheet td[data-sheet="${state.selection.sheet}"][data-row="${row}"][data-col="${col}"]`,
+      );
+      if (!cell) {
+        continue;
+      }
+      cell.textContent = value;
+      syncCellValue(cell);
+    }
+  }
+}
+
+function isPrintableKey(event) {
+  return event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey;
+}
+
+function moveCaretToEnd(element) {
+  const range = document.createRange();
+  const selection = window.getSelection();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 function pasteCells(event) {
+  if (event.defaultPrevented) {
+    return;
+  }
+
   const text = event.clipboardData.getData("text/plain");
   if (!text.includes("\t") && !text.includes("\n")) {
     return;
   }
 
+  const target = event.currentTarget.dataset?.sheet
+    ? event.currentTarget
+    : document.activeElement;
+
+  if (!target?.dataset?.sheet || target.classList.contains("is-editing")) {
+    return;
+  }
+
   event.preventDefault();
-  const sheetName = event.currentTarget.dataset.sheet;
+  const sheetName = target.dataset.sheet;
   const columns = assetColumns;
-  const startRow = Number(event.currentTarget.dataset.row);
-  const startCol = Number(event.currentTarget.dataset.col);
+  const startRow = Number(target.dataset.row);
+  const startCol = Number(target.dataset.col);
   const rows = text.replace(/\r/g, "").split("\n").filter((row) => row.length);
 
   rows.forEach((rowText, rowOffset) => {
@@ -840,5 +987,6 @@ elements.confirmAssetsButton.addEventListener("click", confirmAssets);
 elements.exportYamlButton.addEventListener("click", exportYaml);
 document.addEventListener("mouseup", endSelection);
 document.addEventListener("copy", copySelection);
+document.addEventListener("paste", pasteCells);
 
 renderAll();
