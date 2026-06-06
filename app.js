@@ -25,6 +25,7 @@ const state = {
   editingCell: null,
   autocompleteCell: null,
   cardPreview: {
+    side: "front",
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -71,6 +72,8 @@ const elements = {
   cardPreviewViewport: document.querySelector("#cardPreviewViewport"),
   cardPreviewCanvas: document.querySelector("#cardPreviewCanvas"),
   cardPreview: document.querySelector("#cardPreview"),
+  frontSideButton: document.querySelector("#frontSideButton"),
+  backSideButton: document.querySelector("#backSideButton"),
   zoomOutButton: document.querySelector("#zoomOutButton"),
   zoomResetButton: document.querySelector("#zoomResetButton"),
   zoomInButton: document.querySelector("#zoomInButton"),
@@ -701,25 +704,40 @@ async function renderCardPreview() {
     elements.cardPreviewTitle.textContent = "No card selected";
     elements.cardPreviewMeta.textContent = "Select a card row to preview it on a print template.";
     elements.cardPreview.innerHTML = '<div class="empty-preview">Card template preview</div>';
+    updateCardSideButtons();
     applyCardPreviewTransform();
     return;
   }
 
-  elements.cardPreviewTitle.textContent = selected.frontAlias || "Untitled card";
+  const side = state.cardPreview.side;
+  const selectedId = selected.id;
+  const sideLabel = side === "back" ? "Back" : "Front";
+  const imageAlias = getCardImageAlias(selected, side);
+  elements.cardPreviewTitle.textContent = `${sideLabel}: ${imageAlias || "No image selected"}`;
   elements.cardPreviewMeta.textContent = `${selected.quantity} copies · ${
     selected.templateAlias || "no template"
   } · ${selected.placeholderName || "no placeholder"}`;
+  updateCardSideButtons();
 
   try {
-    elements.cardPreview.innerHTML = await buildCardTemplatePreview(selected);
+    const preview = await buildCardTemplatePreview(selected, side);
+    if (state.selectedCardId !== selectedId || state.cardPreview.side !== side) {
+      return;
+    }
+
+    elements.cardPreview.innerHTML = preview;
     const svg = elements.cardPreview.querySelector("svg");
     if (svg) {
       svg.removeAttribute("width");
       svg.removeAttribute("height");
       svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label", `${selected.frontAlias} card preview`);
+      svg.setAttribute("aria-label", `${imageAlias} ${sideLabel.toLowerCase()} sheet preview`);
     }
   } catch (error) {
+    if (state.selectedCardId !== selectedId || state.cardPreview.side !== side) {
+      return;
+    }
+
     elements.cardPreview.innerHTML = `<div class="empty-preview">${escapeHtml(
       error.message,
     )}</div>`;
@@ -728,18 +746,27 @@ async function renderCardPreview() {
   applyCardPreviewTransform();
 }
 
-async function buildCardTemplatePreview(card) {
+function getCardImageAlias(card, side) {
+  return side === "back" ? card.backAlias : card.frontAlias;
+}
+
+async function buildCardTemplatePreview(card, side = "front") {
   const template = getTemplateByAlias(card.templateAlias);
-  const frontImage = getImageByAlias(card.frontAlias);
+  const imageAlias = getCardImageAlias(card, side);
+  const cardImage = getImageByAlias(imageAlias);
+  const sideLabel = side === "back" ? "Back" : "Front";
 
   if (!template) {
     throw new Error("Template alias not found.");
   }
-  if (!frontImage) {
-    throw new Error("Front image alias not found.");
+  if (!imageAlias) {
+    throw new Error(`${sideLabel} image alias is empty.`);
+  }
+  if (!cardImage) {
+    throw new Error(`${sideLabel} image alias not found.`);
   }
 
-  const imageDataUrl = await getImageSliceDataUrl(frontImage);
+  const imageDataUrl = await getImageSliceDataUrl(cardImage);
   const parser = new DOMParser();
   const documentSvg = parser.parseFromString(template.svgText, "image/svg+xml");
   const svg = documentSvg.querySelector("svg");
@@ -754,13 +781,94 @@ async function buildCardTemplatePreview(card) {
     (image, index) => getPlaceholderName(image, index) === card.placeholderName,
   );
   const targets = matchingNodes.length ? matchingNodes : imageNodes;
+  const replacedTargets = targets.slice(0, card.quantity);
 
-  targets.slice(0, card.quantity).forEach((image) => {
+  replacedTargets.forEach((image) => {
     image.setAttribute("href", imageDataUrl);
     image.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imageDataUrl);
   });
 
+  if (side === "back") {
+    mirrorBackSheet(svg, documentSvg, replacedTargets);
+  }
+
   return new XMLSerializer().serializeToString(svg);
+}
+
+function mirrorBackSheet(svg, documentSvg, imageNodes) {
+  const metrics = getSvgMirrorMetrics(svg);
+  if (!metrics) {
+    throw new Error("The SVG needs a viewBox or numeric width to preview the back side.");
+  }
+
+  imageNodes.forEach(mirrorImageInPlace);
+
+  const group = documentSvg.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute(
+    "transform",
+    `translate(${formatSvgNumber(metrics.mirrorEdge)} 0) scale(-1 1)`,
+  );
+
+  const children = Array.from(svg.childNodes);
+  for (const child of children) {
+    if (shouldKeepSvgRootChild(child)) {
+      continue;
+    }
+    group.append(child);
+  }
+
+  if (group.childNodes.length) {
+    svg.append(group);
+  }
+}
+
+function getSvgMirrorMetrics(svg) {
+  const viewBox = svg.getAttribute("viewBox") || "";
+  const viewBoxParts = viewBox.trim().split(/\s+/).map(Number);
+  if (viewBoxParts.length === 4 && viewBoxParts.every(Number.isFinite) && viewBoxParts[2] > 0) {
+    return {
+      mirrorEdge: viewBoxParts[0] * 2 + viewBoxParts[2],
+    };
+  }
+
+  const width = parseSvgNumber(svg.getAttribute("width"));
+  if (width > 0) {
+    return { mirrorEdge: width };
+  }
+
+  return null;
+}
+
+function shouldKeepSvgRootChild(child) {
+  if (child.nodeType !== 1) {
+    return false;
+  }
+
+  return ["defs", "title", "desc", "metadata", "style"].includes(
+    child.localName?.toLowerCase(),
+  );
+}
+
+function mirrorImageInPlace(image) {
+  const x = parseSvgNumber(image.getAttribute("x"));
+  const width = parseSvgNumber(image.getAttribute("width"));
+
+  if (!(width > 0)) {
+    return;
+  }
+
+  const existingTransform = image.getAttribute("transform") || "";
+  const imageMirror = `translate(${formatSvgNumber(x * 2 + width)} 0) scale(-1 1)`;
+  image.setAttribute("transform", [existingTransform, imageMirror].filter(Boolean).join(" "));
+}
+
+function parseSvgNumber(value) {
+  const number = Number.parseFloat(String(value || "").trim());
+  return Number.isFinite(number) ? number : 0;
+}
+
+function formatSvgNumber(value) {
+  return Number(value.toFixed(6)).toString();
 }
 
 function getSelectedCard() {
@@ -782,7 +890,7 @@ async function getImageSliceDataUrl(image) {
 
   const asset = getAssetForImage(image);
   if (!asset) {
-    throw new Error("Asset for front image not found.");
+    throw new Error("Asset for image not found.");
   }
 
   const cols = Math.max(1, asset.columns);
@@ -1361,6 +1469,20 @@ function setCardPreviewZoom(nextZoom) {
   applyCardPreviewTransform();
 }
 
+function setCardPreviewSide(side) {
+  state.cardPreview.side = side === "back" ? "back" : "front";
+  updateCardSideButtons();
+  renderCardPreview();
+}
+
+function updateCardSideButtons() {
+  const isBack = state.cardPreview.side === "back";
+  elements.frontSideButton.classList.toggle("is-active", !isBack);
+  elements.backSideButton.classList.toggle("is-active", isBack);
+  elements.frontSideButton.setAttribute("aria-pressed", String(!isBack));
+  elements.backSideButton.setAttribute("aria-pressed", String(isBack));
+}
+
 function resetCardPreviewTransform() {
   state.cardPreview.zoom = 1;
   state.cardPreview.panX = 0;
@@ -1770,6 +1892,7 @@ function resetProjectState() {
   state.selection = null;
   state.isSelecting = false;
   state.editingCell = null;
+  state.cardPreview.side = "front";
   hideAutocomplete();
   resetCardPreviewTransform();
 }
@@ -2218,6 +2341,8 @@ elements.confirmAssetsButton.addEventListener("click", confirmAssets);
 elements.confirmImagesButton.addEventListener("click", confirmImages);
 elements.addCardButton.addEventListener("click", addCardRow);
 elements.removeCardButton.addEventListener("click", removeSelectedCardRow);
+elements.frontSideButton.addEventListener("click", () => setCardPreviewSide("front"));
+elements.backSideButton.addEventListener("click", () => setCardPreviewSide("back"));
 elements.zoomOutButton.addEventListener("click", () => setCardPreviewZoom(state.cardPreview.zoom - 0.5));
 elements.zoomResetButton.addEventListener("click", resetCardPreviewTransform);
 elements.zoomInButton.addEventListener("click", () => setCardPreviewZoom(state.cardPreview.zoom + 0.5));
