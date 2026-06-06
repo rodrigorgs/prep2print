@@ -41,6 +41,9 @@
           <button class="step-pill" type="button" data-step-button="cards" disabled>
             5. Create Cards
           </button>
+          <button class="step-pill" type="button" data-step-button="sheets" disabled>
+            6. Generate Sheets
+          </button>
         </nav>
 
         <section class="layout step-view is-active" data-step="templates">
@@ -253,6 +256,9 @@
                 <button class="button secondary" type="button" data-step-button="review">
                   Back
                 </button>
+                <button class="button" type="button" data-step-button="sheets">
+                  Generate Sheets
+                </button>
               </div>
             </div>
             <div class="preview-tools">
@@ -274,6 +280,29 @@
                   <div class="empty-preview">Card template preview</div>
                 </div>
               </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="step-view sheets-view" data-step="sheets" hidden>
+          <section class="preview-band">
+            <div class="preview-header">
+              <div>
+                <h2>Generated Sheets</h2>
+                <p id="generatedSheetsMeta">Cards are arranged into printable template sheets.</p>
+              </div>
+              <div class="button-row compact">
+                <button class="button secondary" type="button" data-step-button="cards">
+                  Back
+                </button>
+                <button id="exportPdfButton" class="button" type="button" disabled>
+                  Export PDF
+                </button>
+              </div>
+            </div>
+            <div id="generatedSheetsWarnings" class="generation-warnings" hidden></div>
+            <div id="generatedSheetsGrid" class="generated-sheets-grid">
+              <div class="empty-preview">Generated sheets preview</div>
             </div>
           </section>
         </section>

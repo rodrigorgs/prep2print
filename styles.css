@@ -630,6 +630,103 @@ input {
   box-shadow: 0 8px 30px rgba(31, 45, 61, 0.18);
 }
 
+.sheets-view {
+  display: grid;
+}
+
+.generation-warnings {
+  display: grid;
+  gap: 6px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--soft-line);
+  background: #fff8e6;
+  color: #7a5200;
+  font-size: 13px;
+}
+
+.generation-warnings p {
+  margin: 0;
+}
+
+.generation-warnings[hidden] {
+  display: none;
+}
+
+.generated-sheets-grid {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  background: #f5f7fa;
+}
+
+.generated-sheet-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+
+.generated-sheet-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.generated-sheet-card h3,
+.generated-sheet-card p,
+.generated-sheet-page h4 {
+  margin: 0;
+}
+
+.generated-sheet-card h3 {
+  font-size: 16px;
+}
+
+.generated-sheet-card p,
+.generated-sheet-page h4 {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.generated-sheet-pages {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.generated-sheet-page {
+  display: grid;
+  gap: 8px;
+}
+
+.generated-sheet-preview {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid var(--soft-line);
+  background:
+    linear-gradient(45deg, #f0f3f7 25%, transparent 25%),
+    linear-gradient(-45deg, #f0f3f7 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f0f3f7 75%),
+    linear-gradient(-45deg, transparent 75%, #f0f3f7 75%);
+  background-color: #fff;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-size: 20px 20px;
+}
+
+.generated-sheet-preview svg {
+  display: block;
+  width: min(100%, 520px);
+  height: auto;
+  max-height: 520px;
+  background: #fff;
+  box-shadow: 0 8px 30px rgba(31, 45, 61, 0.14);
+}
+
 .autocomplete-menu {
   position: absolute;
   z-index: 20;
@@ -691,5 +788,9 @@ input {
 
   .button-row.compact .button {
     flex: 1;
+  }
+
+  .generated-sheet-pages {
+    grid-template-columns: 1fr;
   }
 }

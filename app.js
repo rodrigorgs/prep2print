@@ -12,6 +12,9 @@ const state = {
   selectedImageId: null,
   cards: [],
   selectedCardId: null,
+  generatedSheets: [],
+  generationWarnings: [],
+  generationRequestId: 0,
   confirmedAssets: false,
   confirmedImages: false,
   confirmedCards: false,
@@ -77,6 +80,10 @@ const elements = {
   zoomOutButton: document.querySelector("#zoomOutButton"),
   zoomResetButton: document.querySelector("#zoomResetButton"),
   zoomInButton: document.querySelector("#zoomInButton"),
+  generatedSheetsMeta: document.querySelector("#generatedSheetsMeta"),
+  generatedSheetsWarnings: document.querySelector("#generatedSheetsWarnings"),
+  generatedSheetsGrid: document.querySelector("#generatedSheetsGrid"),
+  exportPdfButton: document.querySelector("#exportPdfButton"),
   autocompleteMenu: document.querySelector("#autocompleteMenu"),
   importYamlButton: document.querySelector("#importYamlButton"),
   importYamlInput: document.querySelector("#importYamlInput"),
@@ -121,7 +128,10 @@ function canOpenStep(step) {
   if (step === "review") {
     return state.confirmedAssets && state.images.length > 0;
   }
-  return state.confirmedImages && state.cards.length > 0;
+  if (step === "cards") {
+    return state.confirmedImages && state.cards.length > 0;
+  }
+  return step === "sheets" && state.confirmedImages && state.cards.length > 0;
 }
 
 function updateStepAvailability() {
@@ -134,6 +144,7 @@ function updateStepAvailability() {
   elements.confirmAssetsButton.disabled = state.assets.length === 0;
   elements.confirmImagesButton.disabled = state.images.length === 0;
   elements.removeCardButton.disabled = !state.selectedCardId;
+  elements.exportPdfButton.disabled = state.generatedSheets.length === 0;
   elements.exportYamlButton.disabled = state.templates.length === 0 && state.assets.length === 0;
 }
 
@@ -386,6 +397,7 @@ function syncCardsFromImages() {
     state.cards[0]?.id ||
     null;
   syncCardSheet();
+  invalidateGeneratedSheets();
 }
 
 function syncCardSheet() {
@@ -414,6 +426,13 @@ function syncCardFromSheet(rowIndex) {
   row[2] = String(card.quantity);
   row[3] = card.templateAlias;
   row[4] = card.placeholderName;
+  invalidateGeneratedSheets();
+}
+
+function invalidateGeneratedSheets() {
+  state.generatedSheets = [];
+  state.generationWarnings = [];
+  state.generationRequestId += 1;
 }
 
 function getDefaultTemplateAlias() {
@@ -453,6 +472,7 @@ function renderAll() {
   renderImageReviewPreview();
   renderSheet(elements.cardSheet, "cards", cardColumns);
   renderCardPreview();
+  renderGeneratedSheets();
 }
 
 function renderTemplates() {
@@ -869,6 +889,345 @@ function parseSvgNumber(value) {
 
 function formatSvgNumber(value) {
   return Number(value.toFixed(6)).toString();
+}
+
+async function renderGeneratedSheets() {
+  if (state.currentStep !== "sheets") {
+    return;
+  }
+
+  const requestId = ++state.generationRequestId;
+  elements.generatedSheetsMeta.textContent = "Building printable sheets...";
+  elements.generatedSheetsGrid.innerHTML = '<div class="empty-preview">Building sheets...</div>';
+  elements.generatedSheetsWarnings.hidden = true;
+  elements.exportPdfButton.disabled = true;
+
+  try {
+    const result = await generatePrintSheets();
+    if (requestId !== state.generationRequestId || state.currentStep !== "sheets") {
+      return;
+    }
+
+    state.generatedSheets = result.sheets;
+    state.generationWarnings = result.warnings;
+    renderGeneratedSheetsResult();
+  } catch (error) {
+    if (requestId !== state.generationRequestId || state.currentStep !== "sheets") {
+      return;
+    }
+
+    state.generatedSheets = [];
+    state.generationWarnings = [error.message];
+    elements.generatedSheetsMeta.textContent = "No sheets generated.";
+    elements.generatedSheetsGrid.innerHTML = `<div class="empty-preview">${escapeHtml(
+      error.message,
+    )}</div>`;
+    renderGenerationWarnings();
+    elements.exportPdfButton.disabled = true;
+  }
+}
+
+function renderGeneratedSheetsResult() {
+  const pageCount = state.generatedSheets.length * 2;
+  elements.generatedSheetsMeta.textContent = `${state.generatedSheets.length} printable ${
+    state.generatedSheets.length === 1 ? "sheet" : "sheets"
+  } · ${pageCount} PDF ${pageCount === 1 ? "page" : "pages"}`;
+  elements.exportPdfButton.disabled = state.generatedSheets.length === 0;
+  renderGenerationWarnings();
+
+  if (!state.generatedSheets.length) {
+    elements.generatedSheetsGrid.innerHTML =
+      '<div class="empty-preview">No printable sheets could be generated.</div>';
+    return;
+  }
+
+  elements.generatedSheetsGrid.innerHTML = state.generatedSheets
+    .map((sheet, index) => renderGeneratedSheetCard(sheet, index))
+    .join("");
+}
+
+function renderGenerationWarnings() {
+  if (!state.generationWarnings.length) {
+    elements.generatedSheetsWarnings.hidden = true;
+    elements.generatedSheetsWarnings.innerHTML = "";
+    return;
+  }
+
+  elements.generatedSheetsWarnings.hidden = false;
+  elements.generatedSheetsWarnings.innerHTML = state.generationWarnings
+    .map((warning) => `<p>${escapeHtml(warning)}</p>`)
+    .join("");
+}
+
+function renderGeneratedSheetCard(sheet, index) {
+  return `
+    <article class="generated-sheet-card">
+      <header>
+        <div>
+          <h3>Sheet ${String(index + 1).padStart(2, "0")}</h3>
+          <p>${escapeHtml(sheet.templateAlias)} · ${sheet.assignmentCount} cards</p>
+        </div>
+      </header>
+      <div class="generated-sheet-pages">
+        ${sheet.pages
+          .map(
+            (page) => `
+              <section class="generated-sheet-page">
+                <h4>${page.side === "front" ? "Front" : "Back"}</h4>
+                <div class="generated-sheet-preview">${page.svgText}</div>
+              </section>
+            `,
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+async function generatePrintSheets() {
+  const warnings = [];
+  const warningSet = new Set();
+  const workingSheets = [];
+
+  function addWarning(message) {
+    if (!warningSet.has(message)) {
+      warningSet.add(message);
+      warnings.push(message);
+    }
+  }
+
+  for (const card of state.cards) {
+    const template = getTemplateByAlias(card.templateAlias);
+    const frontImage = getImageByAlias(card.frontAlias);
+
+    if (!template) {
+      addWarning(`Skipped ${card.frontAlias || "a card"}: template alias not found.`);
+      continue;
+    }
+    if (!frontImage) {
+      addWarning(`Skipped ${card.frontAlias || "a card"}: front image alias not found.`);
+      continue;
+    }
+
+    const quantity = clampPositiveInteger(card.quantity, 1);
+    for (let copy = 0; copy < quantity; copy += 1) {
+      const sheet = findOrCreateWorkingSheet(workingSheets, template, card.placeholderName);
+      const slot = findAvailableSlot(sheet, card.placeholderName);
+
+      if (!slot) {
+        addWarning(`Skipped ${card.frontAlias}: no placeholder slot available.`);
+        continue;
+      }
+
+      slot.assignment = {
+        cardId: card.id,
+        frontAlias: card.frontAlias,
+        backAlias: card.backAlias,
+        placeholderName: card.placeholderName,
+      };
+    }
+  }
+
+  const generatedSheets = [];
+  for (const workingSheet of workingSheets) {
+    const frontSvg = await buildGeneratedSheetSvg(workingSheet, "front", addWarning);
+    const backSvg = await buildGeneratedSheetSvg(workingSheet, "back", addWarning);
+    generatedSheets.push({
+      id: workingSheet.id,
+      templateAlias: workingSheet.template.alias,
+      templateFileName: workingSheet.template.fileName,
+      assignmentCount: workingSheet.slots.filter((slot) => slot.assignment).length,
+      pages: [
+        { side: "front", svgText: frontSvg },
+        { side: "back", svgText: backSvg },
+      ],
+    });
+  }
+
+  return { sheets: generatedSheets, warnings };
+}
+
+function findOrCreateWorkingSheet(workingSheets, template, placeholderName) {
+  const existing = workingSheets.find(
+    (sheet) => sheet.template.alias === template.alias && findAvailableSlot(sheet, placeholderName),
+  );
+  if (existing) {
+    return existing;
+  }
+
+  const slots = getTemplateSlots(template).map((slot) => ({
+    ...slot,
+    assignment: null,
+  }));
+
+  const sheet = {
+    id: crypto.randomUUID(),
+    template,
+    slots,
+  };
+  workingSheets.push(sheet);
+  return sheet;
+}
+
+function findAvailableSlot(sheet, placeholderName) {
+  const eligible = getEligibleSlots(sheet.slots, placeholderName);
+  return eligible.find((slot) => !slot.assignment) || null;
+}
+
+function getEligibleSlots(slots, placeholderName) {
+  const matching = slots.filter((slot) => slot.placeholderName === placeholderName);
+  return matching.length ? matching : slots;
+}
+
+function getTemplateSlots(template) {
+  const parser = new DOMParser();
+  const documentSvg = parser.parseFromString(template.svgText, "image/svg+xml");
+  const svg = documentSvg.querySelector("svg");
+  if (!svg) {
+    throw new Error(`${template.alias} is not a valid SVG template.`);
+  }
+
+  const slots = Array.from(svg.querySelectorAll("image")).map((image, index) => ({
+    index,
+    placeholderName: getPlaceholderName(image, index),
+  }));
+
+  if (!slots.length) {
+    throw new Error(`${template.alias} does not contain image placeholders.`);
+  }
+
+  return slots;
+}
+
+async function buildGeneratedSheetSvg(workingSheet, side, addWarning) {
+  const parser = new DOMParser();
+  const documentSvg = parser.parseFromString(workingSheet.template.svgText, "image/svg+xml");
+  const svg = documentSvg.querySelector("svg");
+  if (!svg) {
+    throw new Error(`${workingSheet.template.alias} is not a valid SVG template.`);
+  }
+
+  removeUnsafeSvgContent(documentSvg);
+
+  const imageNodes = Array.from(svg.querySelectorAll("image"));
+  const replacedNodes = [];
+
+  for (const slot of workingSheet.slots) {
+    if (!slot.assignment) {
+      continue;
+    }
+
+    const alias = side === "back" ? slot.assignment.backAlias : slot.assignment.frontAlias;
+    if (!alias) {
+      if (side === "back") {
+        addWarning(`Back image is empty for ${slot.assignment.frontAlias}.`);
+      }
+      continue;
+    }
+
+    const image = getImageByAlias(alias);
+    if (!image) {
+      addWarning(`${side === "back" ? "Back" : "Front"} image alias not found: ${alias}.`);
+      continue;
+    }
+
+    const imageNode = imageNodes[slot.index];
+    if (!imageNode) {
+      addWarning(`Placeholder slot ${slot.index + 1} is missing in ${workingSheet.template.alias}.`);
+      continue;
+    }
+
+    const imageDataUrl = await getImageSliceDataUrl(image);
+    imageNode.setAttribute("href", imageDataUrl);
+    imageNode.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imageDataUrl);
+    replacedNodes.push(imageNode);
+  }
+
+  if (side === "back") {
+    mirrorBackSheet(svg, documentSvg, replacedNodes);
+  }
+
+  return new XMLSerializer().serializeToString(svg);
+}
+
+function exportGeneratedSheetsPdf() {
+  if (!state.generatedSheets.length) {
+    return;
+  }
+
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    alert("The PDF window was blocked. Allow pop-ups and try again.");
+    return;
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(buildPrintDocumentHtml());
+  printWindow.document.close();
+  printWindow.focus();
+  window.setTimeout(() => {
+    printWindow.print();
+  }, 300);
+}
+
+function buildPrintDocumentHtml() {
+  const pages = state.generatedSheets.flatMap((sheet, sheetIndex) =>
+    sheet.pages.map((page) => ({
+      ...page,
+      sheetIndex,
+      templateAlias: sheet.templateAlias,
+    })),
+  );
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prep2Print PDF</title>
+    <style>
+      @page { margin: 0; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; background: #fff; }
+      .print-page {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100vw;
+        min-height: 100vh;
+        break-after: page;
+        page-break-after: always;
+        overflow: hidden;
+      }
+      .print-page:last-child {
+        break-after: auto;
+        page-break-after: auto;
+      }
+      .print-page svg {
+        display: block;
+        width: 100%;
+        height: auto;
+        max-width: 100vw;
+        max-height: 100vh;
+      }
+      @media print {
+        .print-page {
+          height: 100vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    ${pages
+      .map(
+        (page) => `
+          <section class="print-page" data-sheet="${page.sheetIndex + 1}" data-side="${page.side}">
+            ${page.svgText}
+          </section>
+        `,
+      )
+      .join("")}
+  </body>
+</html>`;
 }
 
 function getSelectedCard() {
@@ -1699,6 +2058,7 @@ function addCardRow() {
   state.cards.push(card);
   state.selectedCardId = card.id;
   state.confirmedCards = false;
+  invalidateGeneratedSheets();
   syncCardSheet();
   renderAll();
   focusCell("cards", state.cards.length - 1, 0);
@@ -1718,6 +2078,7 @@ function removeSelectedCardRow() {
   state.selectedCardId = state.cards[nextIndex]?.id || null;
   state.confirmedCards = false;
   state.selection = null;
+  invalidateGeneratedSheets();
   syncCardSheet();
   renderAll();
 }
@@ -1881,6 +2242,9 @@ function resetProjectState() {
   state.selectedImageId = null;
   state.cards = [];
   state.selectedCardId = null;
+  state.generatedSheets = [];
+  state.generationWarnings = [];
+  state.generationRequestId += 1;
   state.confirmedAssets = false;
   state.confirmedImages = false;
   state.confirmedCards = false;
@@ -2025,6 +2389,9 @@ function normalizeSheet(rows, length) {
 }
 
 function getLatestAvailableStep() {
+  if (canOpenStep("sheets")) {
+    return "sheets";
+  }
   if (canOpenStep("cards")) {
     return "cards";
   }
@@ -2351,6 +2718,7 @@ document.addEventListener("mousemove", moveCardPreviewPan);
 document.addEventListener("mouseup", endCardPreviewPan);
 elements.importYamlButton.addEventListener("click", () => elements.importYamlInput.click());
 elements.importYamlInput.addEventListener("change", handleYamlImport);
+elements.exportPdfButton.addEventListener("click", exportGeneratedSheetsPdf);
 elements.exportYamlButton.addEventListener("click", exportYaml);
 document.addEventListener("mouseup", endSelection);
 document.addEventListener("copy", copySelection);
