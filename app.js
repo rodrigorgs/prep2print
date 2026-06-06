@@ -205,31 +205,55 @@ async function handleTemplateFiles(files) {
   );
 
   for (const file of svgFiles) {
-    const text = await file.text();
-    try {
-      const template = parseSvgFile(file, text);
-      state.templates.push(template);
-      state.selectedTemplateId = template.id;
-    } catch (error) {
-      const template = {
-        id: crypto.randomUUID(),
-        alias: stripExtension(file.name),
-        fileName: file.name,
-        size: file.size,
-        uploadedAt: new Date().toISOString(),
-        imageCount: 0,
-        placeholders: [],
-        width: "",
-        height: "",
-        viewBox: "",
-        svgText: "",
-        error: error.message,
-      };
-      state.templates.push(template);
-      state.selectedTemplateId = template.id;
-    }
+    const template = await createTemplateFromFile(file);
+    state.templates.push(template);
+    state.selectedTemplateId = template.id;
   }
 
+  renderAll();
+}
+
+async function createTemplateFromFile(file, existingTemplate = null) {
+  const text = await file.text();
+  try {
+    const template = parseSvgFile(file, text);
+    return {
+      ...template,
+      id: existingTemplate?.id || template.id,
+      alias: existingTemplate?.alias || template.alias,
+    };
+  } catch (error) {
+    return {
+      id: existingTemplate?.id || crypto.randomUUID(),
+      alias: existingTemplate?.alias || stripExtension(file.name),
+      fileName: file.name,
+      size: file.size,
+      uploadedAt: new Date().toISOString(),
+      imageCount: 0,
+      placeholders: [],
+      width: "",
+      height: "",
+      viewBox: "",
+      svgText: "",
+      error: error.message,
+    };
+  }
+}
+
+async function replaceTemplateFile(templateId, file) {
+  if (!file) {
+    return;
+  }
+
+  const index = state.templates.findIndex((template) => template.id === templateId);
+  if (index < 0) {
+    return;
+  }
+
+  const template = await createTemplateFromFile(file, state.templates[index]);
+  state.templates[index] = template;
+  state.selectedTemplateId = template.id;
+  invalidateGeneratedSheets();
   renderAll();
 }
 
@@ -241,37 +265,77 @@ async function handleAssetFiles(files) {
   }
 
   for (const file of imageFiles) {
-    const dataUrl = await readFileAsDataUrl(file);
-    const asset = {
-      id: crypto.randomUUID(),
-      fileName: file.name,
-      type: file.type,
-      size: file.size,
-      uploadedAt: new Date().toISOString(),
-      dataUrl,
-      objectUrl: URL.createObjectURL(file),
-      rows: 1,
-      columns: 1,
-      imageCount: 1,
-      width: 0,
-      height: 0,
-      status: "Ready",
-    };
-
-    try {
-      const dimensions = await loadImageDimensions(asset.objectUrl);
-      asset.width = dimensions.width;
-      asset.height = dimensions.height;
-    } catch (error) {
-      asset.status = `Error: ${error.message}`;
-    }
-
+    const asset = await createAssetFromFile(file);
     state.assets.push(asset);
     state.selectedAssetId = asset.id;
   }
 
   syncAssetSheet();
   renderAll();
+}
+
+async function createAssetFromFile(file, existingAsset = null) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const asset = {
+    id: existingAsset?.id || crypto.randomUUID(),
+    fileName: file.name,
+    type: file.type,
+    size: file.size,
+    uploadedAt: new Date().toISOString(),
+    dataUrl,
+    objectUrl: URL.createObjectURL(file),
+    rows: existingAsset?.rows || 1,
+    columns: existingAsset?.columns || 1,
+    imageCount: existingAsset?.imageCount || 1,
+    width: 0,
+    height: 0,
+    status: "Ready",
+  };
+
+  try {
+    const dimensions = await loadImageDimensions(asset.objectUrl);
+    asset.width = dimensions.width;
+    asset.height = dimensions.height;
+  } catch (error) {
+    asset.status = `Error: ${error.message}`;
+  }
+
+  return asset;
+}
+
+async function replaceAssetFile(assetId, file) {
+  if (!file) {
+    return;
+  }
+
+  const index = state.assets.findIndex((asset) => asset.id === assetId);
+  if (index < 0) {
+    return;
+  }
+
+  const previousAsset = state.assets[index];
+  const asset = await createAssetFromFile(file, previousAsset);
+  if (previousAsset.objectUrl?.startsWith("blob:")) {
+    URL.revokeObjectURL(previousAsset.objectUrl);
+  }
+
+  state.assets[index] = asset;
+  state.selectedAssetId = asset.id;
+  state.confirmedAssets = false;
+  state.confirmedImages = false;
+  state.confirmedCards = false;
+  clearImageSliceCacheForAsset(asset.id);
+  syncAssetSheet();
+  invalidateGeneratedSheets();
+  renderAll();
+}
+
+function clearImageSliceCacheForAsset(assetId) {
+  state.images
+    .filter((image) => image.assetId === assetId)
+    .forEach((image) => {
+      delete image.sliceDataUrl;
+    });
 }
 
 function readFileAsDataUrl(file) {
@@ -489,6 +553,9 @@ function renderTemplates() {
 
   elements.templateList.className = "template-list";
   for (const template of state.templates) {
+    const card = document.createElement("div");
+    card.className = "template-card-row";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = `template-card${
@@ -505,7 +572,21 @@ function renderTemplates() {
       renderTemplates();
       renderTemplatePreview();
     });
-    elements.templateList.append(button);
+
+    const replaceButton = document.createElement("button");
+    replaceButton.type = "button";
+    replaceButton.className = "replace-file-button";
+    replaceButton.textContent = "Replace";
+    replaceButton.setAttribute("aria-label", `Replace ${template.fileName}`);
+    replaceButton.addEventListener("click", () => {
+      promptFileReplacement({
+        accept: ".svg,image/svg+xml",
+        onSelect: (file) => replaceTemplateFile(template.id, file),
+      });
+    });
+
+    card.append(button, replaceButton);
+    elements.templateList.append(card);
   }
 }
 
@@ -557,6 +638,9 @@ function renderAssetList() {
 
   elements.assetList.className = "template-list";
   for (const asset of state.assets) {
+    const card = document.createElement("div");
+    card.className = "template-card-row";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = `template-card${asset.id === state.selectedAssetId ? " is-selected" : ""}`;
@@ -572,8 +656,37 @@ function renderAssetList() {
       renderAssetUploadPreview();
       renderAssetConfigPreview();
     });
-    elements.assetList.append(button);
+
+    const replaceButton = document.createElement("button");
+    replaceButton.type = "button";
+    replaceButton.className = "replace-file-button";
+    replaceButton.textContent = "Replace";
+    replaceButton.setAttribute("aria-label", `Replace ${asset.fileName}`);
+    replaceButton.addEventListener("click", () => {
+      promptFileReplacement({
+        accept: "image/png,image/jpeg,image/webp,image/gif,image/svg+xml",
+        onSelect: (file) => replaceAssetFile(asset.id, file),
+      });
+    });
+
+    card.append(button, replaceButton);
+    elements.assetList.append(card);
   }
+}
+
+function promptFileReplacement({ accept, onSelect }) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = accept;
+  input.style.display = "none";
+  input.addEventListener("change", () => {
+    Promise.resolve(onSelect(input.files?.[0] || null)).catch((error) => {
+      alert(`Could not replace file: ${error.message}`);
+    });
+    input.remove();
+  });
+  document.body.append(input);
+  input.click();
 }
 
 function renderAssetUploadPreview() {
@@ -1108,6 +1221,7 @@ async function buildGeneratedSheetSvg(workingSheet, side, addWarning) {
   }
 
   removeUnsafeSvgContent(documentSvg);
+  hideGeneratedSheetPrintGuides(documentSvg);
 
   const imageNodes = Array.from(svg.querySelectorAll("image"));
   const replacedNodes = [];
@@ -1148,6 +1262,32 @@ async function buildGeneratedSheetSvg(workingSheet, side, addWarning) {
   }
 
   return new XMLSerializer().serializeToString(svg);
+}
+
+function hideGeneratedSheetPrintGuides(documentSvg) {
+  for (const element of documentSvg.querySelectorAll("*")) {
+    if (hasPrintGuideStroke(element)) {
+      element.setAttribute("display", "none");
+    }
+  }
+}
+
+function hasPrintGuideStroke(element) {
+  const stroke = element.getAttribute("stroke") || "";
+  if (isPrintGuideStrokeColor(stroke)) {
+    return true;
+  }
+
+  const style = element.getAttribute("style") || "";
+  return style
+    .split(";")
+    .map((declaration) => declaration.split(":").map((part) => part.trim()))
+    .some(([property, value]) => property?.toLowerCase() === "stroke" && isPrintGuideStrokeColor(value));
+}
+
+function isPrintGuideStrokeColor(value) {
+  const color = String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+  return color === "#123456" || color === "rgb(18,52,86)";
 }
 
 function exportGeneratedSheetsPdf() {
