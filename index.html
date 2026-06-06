@@ -19,16 +19,28 @@
           </button>
         </header>
 
-        <section class="layout">
+        <nav class="stepper" aria-label="Project steps">
+          <button class="step-pill is-active" type="button" data-step-button="templates">
+            1. Print Templates
+          </button>
+          <button class="step-pill" type="button" data-step-button="assets" disabled>
+            2. Assets
+          </button>
+          <button class="step-pill" type="button" data-step-button="configure" disabled>
+            3. Configure Assets
+          </button>
+        </nav>
+
+        <section class="layout step-view is-active" data-step="templates">
           <aside class="panel sidebar">
             <div
-              id="dropZone"
+              id="templateDropZone"
               class="drop-zone"
               tabindex="0"
               role="button"
               aria-label="Upload SVG templates"
             >
-              <input id="fileInput" type="file" accept=".svg,image/svg+xml" multiple />
+              <input id="templateFileInput" type="file" accept=".svg,image/svg+xml" multiple />
               <div class="upload-icon" aria-hidden="true">+</div>
               <strong>Upload SVG templates</strong>
               <span>Drop files here or click to browse</span>
@@ -41,6 +53,10 @@
             <div id="templateList" class="template-list empty">
               <p>No SVG templates uploaded yet.</p>
             </div>
+
+            <button id="continueToAssetsButton" class="button full-width" type="button" disabled>
+              Continue to Assets
+            </button>
           </aside>
 
           <section class="content">
@@ -66,17 +82,104 @@
                   <thead>
                     <tr>
                       <th></th>
-                      <th>A</th>
-                      <th>B</th>
-                      <th>C</th>
-                      <th>D</th>
-                      <th>E</th>
                     </tr>
                   </thead>
                   <tbody></tbody>
                 </table>
               </div>
             </section>
+          </section>
+        </section>
+
+        <section class="layout step-view" data-step="assets">
+          <aside class="panel sidebar">
+            <div
+              id="assetDropZone"
+              class="drop-zone"
+              tabindex="0"
+              role="button"
+              aria-label="Upload image assets"
+            >
+              <input
+                id="assetFileInput"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                multiple
+              />
+              <div class="upload-icon" aria-hidden="true">+</div>
+              <strong>Upload image assets</strong>
+              <span>Drop files here or click to browse</span>
+            </div>
+
+            <div class="section-heading">
+              <h2>Assets</h2>
+              <span id="assetCount">0 files</span>
+            </div>
+            <div id="assetList" class="template-list empty">
+              <p>No image assets uploaded yet.</p>
+            </div>
+
+            <div class="button-row">
+              <button class="button secondary" type="button" data-step-button="templates">
+                Back
+              </button>
+              <button id="continueToConfigureButton" class="button" type="button" disabled>
+                Configure Assets
+              </button>
+            </div>
+          </aside>
+
+          <section class="content">
+            <section class="preview-band">
+              <div class="preview-header">
+                <div>
+                  <h2 id="assetUploadTitle">No asset selected</h2>
+                  <p id="assetUploadMeta">Upload image assets to prepare the sheet.</p>
+                </div>
+              </div>
+              <div id="assetUploadPreview" class="svg-preview asset-preview">
+                <div class="empty-preview">Asset preview</div>
+              </div>
+            </section>
+          </section>
+        </section>
+
+        <section class="configure-view step-view" data-step="configure">
+          <section class="sheet-band">
+            <div class="section-heading">
+              <h2>Asset Sheet</h2>
+              <span>select a row, then edit rows, columns, and image count</span>
+            </div>
+            <div class="sheet-wrap" aria-label="Editable asset sheet">
+              <table id="assetSheet" class="sheet asset-sheet">
+                <thead>
+                  <tr>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="preview-band">
+            <div class="preview-header">
+              <div>
+                <h2 id="assetConfigTitle">No asset selected</h2>
+                <p id="assetConfigMeta">Click an asset row to inspect slices.</p>
+              </div>
+              <div class="button-row compact">
+                <button class="button secondary" type="button" data-step-button="assets">
+                  Back
+                </button>
+                <button id="confirmAssetsButton" class="button" type="button" disabled>
+                  Confirm Assets
+                </button>
+              </div>
+            </div>
+            <div id="assetConfigPreview" class="svg-preview asset-config-preview">
+              <div class="empty-preview">Sliced asset preview</div>
+            </div>
           </section>
         </section>
       </section>

@@ -1,32 +1,92 @@
+const templateColumns = ["File name", "Cards", "Page size", "ViewBox", "Status"];
+const assetColumns = ["File name", "Rows", "Columns", "Images", "Dimensions", "Status"];
+const minimumTemplateRows = 12;
+
 const state = {
+  currentStep: "templates",
   templates: [],
-  selectedId: null,
-  sheet: [],
+  selectedTemplateId: null,
+  assets: [],
+  selectedAssetId: null,
+  confirmedAssets: false,
+  sheets: {
+    templates: createSheet(templateColumns, minimumTemplateRows),
+    assets: createSheet(assetColumns, 0),
+  },
   selection: null,
   isSelecting: false,
 };
 
-const columns = ["File name", "Cards", "Page size", "ViewBox", "Status"];
-const sheetRows = 12;
-const sheetCols = columns.length;
+const elements = {
+  stepViews: document.querySelectorAll("[data-step]"),
+  stepButtons: document.querySelectorAll("[data-step-button]"),
+  templateFileInput: document.querySelector("#templateFileInput"),
+  templateDropZone: document.querySelector("#templateDropZone"),
+  templateList: document.querySelector("#templateList"),
+  templateCount: document.querySelector("#templateCount"),
+  continueToAssetsButton: document.querySelector("#continueToAssetsButton"),
+  previewTitle: document.querySelector("#previewTitle"),
+  previewMeta: document.querySelector("#previewMeta"),
+  svgPreview: document.querySelector("#svgPreview"),
+  projectSheet: document.querySelector("#projectSheet"),
+  assetFileInput: document.querySelector("#assetFileInput"),
+  assetDropZone: document.querySelector("#assetDropZone"),
+  assetList: document.querySelector("#assetList"),
+  assetCount: document.querySelector("#assetCount"),
+  continueToConfigureButton: document.querySelector("#continueToConfigureButton"),
+  assetUploadTitle: document.querySelector("#assetUploadTitle"),
+  assetUploadMeta: document.querySelector("#assetUploadMeta"),
+  assetUploadPreview: document.querySelector("#assetUploadPreview"),
+  assetSheet: document.querySelector("#assetSheet"),
+  assetConfigTitle: document.querySelector("#assetConfigTitle"),
+  assetConfigMeta: document.querySelector("#assetConfigMeta"),
+  assetConfigPreview: document.querySelector("#assetConfigPreview"),
+  confirmAssetsButton: document.querySelector("#confirmAssetsButton"),
+  exportYamlButton: document.querySelector("#exportYamlButton"),
+};
 
-const fileInput = document.querySelector("#fileInput");
-const dropZone = document.querySelector("#dropZone");
-const templateList = document.querySelector("#templateList");
-const templateCount = document.querySelector("#templateCount");
-const previewTitle = document.querySelector("#previewTitle");
-const previewMeta = document.querySelector("#previewMeta");
-const svgPreview = document.querySelector("#svgPreview");
-const projectSheetBody = document.querySelector("#projectSheet tbody");
-const exportYamlButton = document.querySelector("#exportYamlButton");
+function createSheet(columns, minRows) {
+  return Array.from({ length: minRows }, () => Array.from({ length: columns.length }, () => ""));
+}
 
-function initSheet() {
-  state.sheet = Array.from({ length: sheetRows }, (_, rowIndex) =>
-    Array.from({ length: sheetCols }, (_, colIndex) =>
-      rowIndex === 0 ? columns[colIndex] : "",
-    ),
-  );
-  renderSheet();
+function setStep(step) {
+  if (!canOpenStep(step)) {
+    return;
+  }
+
+  state.currentStep = step;
+  state.selection = null;
+
+  elements.stepViews.forEach((view) => {
+    view.classList.toggle("is-active", view.dataset.step === step);
+  });
+
+  elements.stepButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.stepButton === step);
+  });
+
+  renderAll();
+}
+
+function canOpenStep(step) {
+  if (step === "templates") {
+    return true;
+  }
+  if (step === "assets") {
+    return state.templates.length > 0;
+  }
+  return state.assets.length > 0;
+}
+
+function updateStepAvailability() {
+  elements.stepButtons.forEach((button) => {
+    const step = button.dataset.stepButton;
+    button.disabled = !canOpenStep(step);
+  });
+  elements.continueToAssetsButton.disabled = state.templates.length === 0;
+  elements.continueToConfigureButton.disabled = state.assets.length === 0;
+  elements.confirmAssetsButton.disabled = state.assets.length === 0;
+  elements.exportYamlButton.disabled = state.templates.length === 0 && state.assets.length === 0;
 }
 
 function parseSvgFile(file, text) {
@@ -49,7 +109,7 @@ function parseSvgFile(file, text) {
   const viewBox = svg.getAttribute("viewBox") || "";
 
   return {
-    id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
+    id: crypto.randomUUID(),
     fileName: file.name,
     size: file.size,
     uploadedAt: new Date().toISOString(),
@@ -61,7 +121,7 @@ function parseSvgFile(file, text) {
   };
 }
 
-async function handleFiles(files) {
+async function handleTemplateFiles(files) {
   const svgFiles = Array.from(files).filter((file) =>
     file.name.toLowerCase().endsWith(".svg") || file.type === "image/svg+xml",
   );
@@ -72,10 +132,10 @@ async function handleFiles(files) {
       const template = parseSvgFile(file, text);
       state.templates.push(template);
       upsertTemplateRow(template);
-      state.selectedId = template.id;
+      state.selectedTemplateId = template.id;
     } catch (error) {
-      state.templates.push({
-        id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
+      const template = {
+        id: crypto.randomUUID(),
         fileName: file.name,
         size: file.size,
         uploadedAt: new Date().toISOString(),
@@ -85,27 +145,25 @@ async function handleFiles(files) {
         viewBox: "",
         svgText: "",
         error: error.message,
-      });
+      };
+      state.templates.push(template);
+      upsertTemplateRow(template);
+      state.selectedTemplateId = template.id;
     }
   }
 
-  renderTemplates();
-  renderSheet();
-  renderPreview();
-  exportYamlButton.disabled = state.templates.length === 0;
+  renderAll();
 }
 
 function upsertTemplateRow(template) {
-  let nextRow = state.sheet.findIndex(
-    (row, index) => index > 0 && row.every((cell) => !cell),
-  );
+  let nextRow = state.sheets.templates.findIndex((row) => row.every((cell) => !cell));
 
   if (nextRow === -1) {
-    state.sheet.push(Array.from({ length: sheetCols }, () => ""));
-    nextRow = state.sheet.length - 1;
+    state.sheets.templates.push(Array.from({ length: templateColumns.length }, () => ""));
+    nextRow = state.sheets.templates.length - 1;
   }
 
-  state.sheet[nextRow] = [
+  state.sheets.templates[nextRow] = [
     template.fileName,
     String(template.imageCount),
     [template.width, template.height].filter(Boolean).join(" x "),
@@ -114,23 +172,132 @@ function upsertTemplateRow(template) {
   ];
 }
 
-function renderTemplates() {
-  templateCount.textContent = `${state.templates.length} ${
-    state.templates.length === 1 ? "file" : "files"
-  }`;
-  templateList.innerHTML = "";
+async function handleAssetFiles(files) {
+  const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
 
-  if (!state.templates.length) {
-    templateList.className = "template-list empty";
-    templateList.innerHTML = "<p>No SVG templates uploaded yet.</p>";
+  if (imageFiles.length) {
+    state.confirmedAssets = false;
+  }
+
+  for (const file of imageFiles) {
+    const dataUrl = await readFileAsDataUrl(file);
+    const asset = {
+      id: crypto.randomUUID(),
+      fileName: file.name,
+      type: file.type,
+      size: file.size,
+      uploadedAt: new Date().toISOString(),
+      dataUrl,
+      objectUrl: URL.createObjectURL(file),
+      rows: 1,
+      columns: 1,
+      imageCount: 1,
+      width: 0,
+      height: 0,
+      status: "Ready",
+    };
+
+    try {
+      const dimensions = await loadImageDimensions(asset.objectUrl);
+      asset.width = dimensions.width;
+      asset.height = dimensions.height;
+    } catch (error) {
+      asset.status = `Error: ${error.message}`;
+    }
+
+    state.assets.push(asset);
+    state.selectedAssetId = asset.id;
+  }
+
+  syncAssetSheet();
+  renderAll();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result));
+    reader.addEventListener("error", () => reject(new Error("The asset could not be read.")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageDimensions(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener("load", () => {
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    });
+    image.addEventListener("error", () => reject(new Error("The image could not be loaded.")));
+    image.src = src;
+  });
+}
+
+function syncAssetSheet() {
+  state.sheets.assets = state.assets.map((asset) => [
+    asset.fileName,
+    String(asset.rows),
+    String(asset.columns),
+    String(asset.imageCount),
+    asset.width && asset.height ? `${asset.width} x ${asset.height}` : "unknown",
+    asset.status,
+  ]);
+}
+
+function syncAssetFromSheet(rowIndex) {
+  const asset = state.assets[rowIndex];
+  if (!asset) {
     return;
   }
 
-  templateList.className = "template-list";
+  const row = state.sheets.assets[rowIndex];
+  asset.fileName = row[0] || asset.fileName;
+  asset.rows = clampPositiveInteger(row[1], 1);
+  asset.columns = clampPositiveInteger(row[2], 1);
+  asset.imageCount = clampPositiveInteger(row[3], 1);
+  row[1] = String(asset.rows);
+  row[2] = String(asset.columns);
+  row[3] = String(asset.imageCount);
+}
+
+function clampPositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function renderAll() {
+  updateStepAvailability();
+  renderTemplates();
+  renderTemplatePreview();
+  renderAssetList();
+  renderAssetUploadPreview();
+  renderSheet(elements.projectSheet, "templates", templateColumns);
+  renderSheet(elements.assetSheet, "assets", assetColumns);
+  renderAssetConfigPreview();
+}
+
+function renderTemplates() {
+  elements.templateCount.textContent = `${state.templates.length} ${
+    state.templates.length === 1 ? "file" : "files"
+  }`;
+  elements.templateList.innerHTML = "";
+
+  if (!state.templates.length) {
+    elements.templateList.className = "template-list empty";
+    elements.templateList.innerHTML = "<p>No SVG templates uploaded yet.</p>";
+    return;
+  }
+
+  elements.templateList.className = "template-list";
   for (const template of state.templates) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `template-card${template.id === state.selectedId ? " is-selected" : ""}`;
+    button.className = `template-card${
+      template.id === state.selectedTemplateId ? " is-selected" : ""
+    }`;
     button.innerHTML = `
       <strong>${escapeHtml(template.fileName)}</strong>
       <span class="badge">${template.imageCount} cards</span>
@@ -138,43 +305,152 @@ function renderTemplates() {
       <span>${formatBytes(template.size)}</span>
     `;
     button.addEventListener("click", () => {
-      state.selectedId = template.id;
+      state.selectedTemplateId = template.id;
       renderTemplates();
-      renderPreview();
+      renderTemplatePreview();
     });
-    templateList.append(button);
+    elements.templateList.append(button);
   }
 }
 
-function renderPreview() {
-  const selected = state.templates.find((template) => template.id === state.selectedId);
+function renderTemplatePreview() {
+  const selected = state.templates.find(
+    (template) => template.id === state.selectedTemplateId,
+  );
 
   if (!selected) {
-    previewTitle.textContent = "No template selected";
-    previewMeta.textContent = "Upload an SVG to inspect the print sheet.";
-    svgPreview.innerHTML = '<div class="empty-preview">SVG preview</div>';
+    elements.previewTitle.textContent = "No template selected";
+    elements.previewMeta.textContent = "Upload an SVG to inspect the print sheet.";
+    elements.svgPreview.innerHTML = '<div class="empty-preview">SVG preview</div>';
     return;
   }
 
-  previewTitle.textContent = selected.fileName;
-  previewMeta.textContent = `${selected.imageCount} cards · ${
+  elements.previewTitle.textContent = selected.fileName;
+  elements.previewMeta.textContent = `${selected.imageCount} cards · ${
     [selected.width, selected.height].filter(Boolean).join(" x ") || "unknown page size"
   }`;
 
   if (selected.error) {
-    svgPreview.innerHTML = `<div class="empty-preview">${escapeHtml(selected.error)}</div>`;
+    elements.svgPreview.innerHTML = `<div class="empty-preview">${escapeHtml(
+      selected.error,
+    )}</div>`;
     return;
   }
 
-  const sanitized = sanitizeSvgForPreview(selected.svgText);
-  svgPreview.innerHTML = sanitized;
-  const svg = svgPreview.querySelector("svg");
+  elements.svgPreview.innerHTML = sanitizeSvgForPreview(selected.svgText);
+  const svg = elements.svgPreview.querySelector("svg");
   if (svg) {
     svg.removeAttribute("width");
     svg.removeAttribute("height");
     svg.setAttribute("role", "img");
     svg.setAttribute("aria-label", selected.fileName);
   }
+}
+
+function renderAssetList() {
+  elements.assetCount.textContent = `${state.assets.length} ${
+    state.assets.length === 1 ? "file" : "files"
+  }`;
+  elements.assetList.innerHTML = "";
+
+  if (!state.assets.length) {
+    elements.assetList.className = "template-list empty";
+    elements.assetList.innerHTML = "<p>No image assets uploaded yet.</p>";
+    return;
+  }
+
+  elements.assetList.className = "template-list";
+  for (const asset of state.assets) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `template-card${asset.id === state.selectedAssetId ? " is-selected" : ""}`;
+    button.innerHTML = `
+      <strong>${escapeHtml(asset.fileName)}</strong>
+      <span class="badge">${asset.imageCount} images</span>
+      <span>${asset.width && asset.height ? `${asset.width} x ${asset.height}` : "unknown"}</span>
+      <span>${formatBytes(asset.size)}</span>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedAssetId = asset.id;
+      renderAssetList();
+      renderAssetUploadPreview();
+      renderAssetConfigPreview();
+    });
+    elements.assetList.append(button);
+  }
+}
+
+function renderAssetUploadPreview() {
+  const selected = getSelectedAsset();
+
+  if (!selected) {
+    elements.assetUploadTitle.textContent = "No asset selected";
+    elements.assetUploadMeta.textContent = "Upload image assets to prepare the sheet.";
+    elements.assetUploadPreview.innerHTML = '<div class="empty-preview">Asset preview</div>';
+    return;
+  }
+
+  elements.assetUploadTitle.textContent = selected.fileName;
+  elements.assetUploadMeta.textContent = `${formatBytes(selected.size)} · ${
+    selected.width && selected.height ? `${selected.width} x ${selected.height}` : "unknown"
+  }`;
+  elements.assetUploadPreview.innerHTML = `<img alt="${escapeHtml(
+    selected.fileName,
+  )}" src="${selected.objectUrl}" />`;
+}
+
+function renderAssetConfigPreview() {
+  const selected = getSelectedAsset();
+
+  if (!selected) {
+    elements.assetConfigTitle.textContent = "No asset selected";
+    elements.assetConfigMeta.textContent = state.confirmedAssets
+      ? "Assets confirmed for the next project step."
+      : "Click an asset row to inspect slices.";
+    elements.assetConfigPreview.innerHTML =
+      '<div class="empty-preview">Sliced asset preview</div>';
+    return;
+  }
+
+  elements.assetConfigTitle.textContent = selected.fileName;
+  elements.assetConfigMeta.textContent = state.confirmedAssets
+    ? "Assets confirmed for the next project step."
+    : `${selected.rows} rows · ${selected.columns} columns · ${selected.imageCount} visible images`;
+  elements.assetConfigPreview.innerHTML = buildAssetGrid(selected);
+}
+
+function buildAssetGrid(asset) {
+  const cols = Math.max(1, asset.columns);
+  const rows = Math.max(1, asset.rows);
+  const count = Math.min(asset.imageCount, cols * rows);
+  const ratio = asset.width && asset.height ? asset.width / asset.height : 1;
+  const tiles = [];
+
+  for (let index = 0; index < rows * cols; index += 1) {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    const x = cols === 1 ? "0%" : `${(col / (cols - 1)) * 100}%`;
+    const y = rows === 1 ? "0%" : `${(row / (rows - 1)) * 100}%`;
+    const hiddenClass = index >= count ? " is-hidden" : "";
+    tiles.push(
+      `<div class="asset-tile${hiddenClass}" style="--tile-x: ${x}; --tile-y: ${y};"></div>`,
+    );
+  }
+
+  return `
+    <div
+      class="asset-grid"
+      style="--grid-cols: ${cols}; --grid-rows: ${rows}; --asset-ratio: ${ratio}; --asset-image: url('${asset.objectUrl.replace(/'/g, "%27")}');"
+      role="img"
+      aria-label="${escapeHtml(asset.fileName)} sliced preview"
+    >
+      ${tiles.join("")}
+    </div>
+  `;
+}
+
+function getSelectedAsset() {
+  return state.assets.find((asset) => asset.id === state.selectedAssetId);
 }
 
 function sanitizeSvgForPreview(svgText) {
@@ -198,19 +474,26 @@ function sanitizeSvgForPreview(svgText) {
   return new XMLSerializer().serializeToString(documentSvg.documentElement);
 }
 
-function renderSheet() {
-  projectSheetBody.innerHTML = "";
+function renderSheet(table, sheetName, columns) {
+  renderSheetHeader(table, columns);
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
 
-  state.sheet.forEach((row, rowIndex) => {
+  state.sheets[sheetName].forEach((row, rowIndex) => {
     const tr = document.createElement("tr");
+    if (sheetName === "assets" && state.assets[rowIndex]?.id === state.selectedAssetId) {
+      tr.classList.add("is-active-row");
+    }
+
     const rowHead = document.createElement("th");
     rowHead.textContent = String(rowIndex + 1);
     tr.append(rowHead);
 
-    for (let colIndex = 0; colIndex < sheetCols; colIndex += 1) {
+    columns.forEach((_, colIndex) => {
       const td = document.createElement("td");
-      td.contentEditable = "true";
+      td.contentEditable = sheetName === "assets" ? String(colIndex <= 3) : "true";
       td.spellcheck = false;
+      td.dataset.sheet = sheetName;
       td.dataset.row = String(rowIndex);
       td.dataset.col = String(colIndex);
       td.textContent = row[colIndex] ?? "";
@@ -219,47 +502,82 @@ function renderSheet() {
       td.addEventListener("mouseenter", extendSelection);
       td.addEventListener("input", updateCell);
       td.addEventListener("paste", pasteCells);
+      td.addEventListener("click", handleCellClick);
       tr.append(td);
-    }
+    });
 
-    projectSheetBody.append(tr);
+    tbody.append(tr);
   });
 }
 
-function selectCell(event) {
-  const row = Number(event.currentTarget.dataset.row);
-  const col = Number(event.currentTarget.dataset.col);
+function renderSheetHeader(table, columns) {
+  const headRow = table.querySelector("thead tr");
+  headRow.innerHTML = "<th></th>";
 
-  if (!state.selection) {
-    state.selection = { startRow: row, startCol: col, endRow: row, endCol: col };
+  for (const column of columns) {
+    const th = document.createElement("th");
+    th.textContent = column;
+    headRow.append(th);
   }
+}
 
+function handleCellClick(event) {
+  const sheetName = event.currentTarget.dataset.sheet;
+  const rowIndex = Number(event.currentTarget.dataset.row);
+
+  if (sheetName === "assets" && state.assets[rowIndex]) {
+    state.selectedAssetId = state.assets[rowIndex].id;
+    renderAssetList();
+    renderSheet(elements.assetSheet, "assets", assetColumns);
+    renderAssetConfigPreview();
+  }
+}
+
+function selectCell(event) {
+  const cell = event.currentTarget;
+  const row = Number(cell.dataset.row);
+  const col = Number(cell.dataset.col);
+  state.selection = {
+    sheet: cell.dataset.sheet,
+    startRow: row,
+    startCol: col,
+    endRow: row,
+    endCol: col,
+  };
   paintSelection();
 }
 
 function beginSelection(event) {
-  const row = Number(event.currentTarget.dataset.row);
-  const col = Number(event.currentTarget.dataset.col);
+  const cell = event.currentTarget;
+  const row = Number(cell.dataset.row);
+  const col = Number(cell.dataset.col);
 
   state.isSelecting = true;
 
-  if (event.shiftKey && state.selection) {
+  if (event.shiftKey && state.selection?.sheet === cell.dataset.sheet) {
     state.selection.endRow = row;
     state.selection.endCol = col;
   } else {
-    state.selection = { startRow: row, startCol: col, endRow: row, endCol: col };
+    state.selection = {
+      sheet: cell.dataset.sheet,
+      startRow: row,
+      startCol: col,
+      endRow: row,
+      endCol: col,
+    };
   }
 
   paintSelection();
 }
 
 function extendSelection(event) {
-  if (!state.isSelecting || !state.selection) {
+  const cell = event.currentTarget;
+  if (!state.isSelecting || !state.selection || state.selection.sheet !== cell.dataset.sheet) {
     return;
   }
 
-  state.selection.endRow = Number(event.currentTarget.dataset.row);
-  state.selection.endCol = Number(event.currentTarget.dataset.col);
+  state.selection.endRow = Number(cell.dataset.row);
+  state.selection.endCol = Number(cell.dataset.col);
   paintSelection();
 }
 
@@ -281,7 +599,9 @@ function paintSelection() {
   for (let row = range.startRow; row <= range.endRow; row += 1) {
     for (let col = range.startCol; col <= range.endCol; col += 1) {
       document
-        .querySelector(`.sheet td[data-row="${row}"][data-col="${col}"]`)
+        .querySelector(
+          `.sheet td[data-sheet="${state.selection.sheet}"][data-row="${row}"][data-col="${col}"]`,
+        )
         ?.classList.add("is-selected");
     }
   }
@@ -297,8 +617,18 @@ function normalizeSelection(selection) {
 }
 
 function updateCell(event) {
-  const { row, col } = event.currentTarget.dataset;
-  state.sheet[Number(row)][Number(col)] = event.currentTarget.textContent;
+  const cell = event.currentTarget;
+  const sheetName = cell.dataset.sheet;
+  const rowIndex = Number(cell.dataset.row);
+  const colIndex = Number(cell.dataset.col);
+  state.sheets[sheetName][rowIndex][colIndex] = cell.textContent;
+
+  if (sheetName === "assets") {
+    state.confirmedAssets = false;
+    syncAssetFromSheet(rowIndex);
+    renderAssetConfigPreview();
+    renderAssetList();
+  }
 }
 
 function pasteCells(event) {
@@ -308,6 +638,8 @@ function pasteCells(event) {
   }
 
   event.preventDefault();
+  const sheetName = event.currentTarget.dataset.sheet;
+  const columns = sheetName === "assets" ? assetColumns : templateColumns;
   const startRow = Number(event.currentTarget.dataset.row);
   const startCol = Number(event.currentTarget.dataset.col);
   const rows = text.replace(/\r/g, "").split("\n").filter((row) => row.length);
@@ -316,22 +648,26 @@ function pasteCells(event) {
     const cells = rowText.split("\t");
     const targetRow = startRow + rowOffset;
 
-    while (state.sheet.length <= targetRow) {
-      state.sheet.push(Array.from({ length: sheetCols }, () => ""));
+    while (state.sheets[sheetName].length <= targetRow) {
+      state.sheets[sheetName].push(Array.from({ length: columns.length }, () => ""));
     }
 
     cells.forEach((cellText, colOffset) => {
       const targetCol = startCol + colOffset;
-      if (targetCol < sheetCols) {
-        state.sheet[targetRow][targetCol] = cellText;
+      if (targetCol < columns.length) {
+        state.sheets[sheetName][targetRow][targetCol] = cellText;
       }
     });
+
+    if (sheetName === "assets") {
+      state.confirmedAssets = false;
+      syncAssetFromSheet(targetRow);
+    }
   });
 
-  renderSheet();
-  paintSelection();
+  renderAll();
   const nextCell = document.querySelector(
-    `.sheet td[data-row="${startRow}"][data-col="${startCol}"]`,
+    `.sheet td[data-sheet="${sheetName}"][data-row="${startRow}"][data-col="${startCol}"]`,
   );
   nextCell?.focus();
 }
@@ -342,25 +678,32 @@ function copySelection(event) {
   }
 
   const range = normalizeSelection(state.selection);
-  const text = [];
+  const rows = [];
 
   for (let row = range.startRow; row <= range.endRow; row += 1) {
     const cells = [];
     for (let col = range.startCol; col <= range.endCol; col += 1) {
-      cells.push(state.sheet[row]?.[col] ?? "");
+      cells.push(state.sheets[state.selection.sheet]?.[row]?.[col] ?? "");
     }
-    text.push(cells.join("\t"));
+    rows.push(cells.join("\t"));
   }
 
-  event.clipboardData.setData("text/plain", text.join("\n"));
+  event.clipboardData.setData("text/plain", rows.join("\n"));
   event.preventDefault();
+}
+
+function confirmAssets() {
+  state.confirmedAssets = true;
+  renderAssetConfigPreview();
 }
 
 function exportYaml() {
   const yaml = toYaml({
     app: "Prep2Print",
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
+    currentStep: state.currentStep,
+    confirmedAssets: state.confirmedAssets,
     templates: state.templates.map((template) => ({
       fileName: template.fileName,
       size: template.size,
@@ -371,7 +714,22 @@ function exportYaml() {
       uploadedAt: template.uploadedAt,
       svg: template.svgText,
     })),
-    sheet: state.sheet,
+    assets: state.assets.map((asset) => ({
+      fileName: asset.fileName,
+      type: asset.type,
+      size: asset.size,
+      rows: asset.rows,
+      columns: asset.columns,
+      imageCount: asset.imageCount,
+      width: asset.width,
+      height: asset.height,
+      uploadedAt: asset.uploadedAt,
+      dataUrl: asset.dataUrl,
+    })),
+    sheets: {
+      templates: state.sheets.templates,
+      assets: state.sheets.assets,
+    },
   });
   downloadFile("prep2print-project.yaml", yaml, "application/x-yaml");
 }
@@ -463,36 +821,45 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-fileInput.addEventListener("change", (event) => {
-  handleFiles(event.target.files);
-  event.target.value = "";
-});
+function bindDropZone(dropZone, input, handler) {
+  input.addEventListener("change", (event) => {
+    handler(event.target.files);
+    event.target.value = "";
+  });
 
-dropZone.addEventListener("dragover", (event) => {
-  event.preventDefault();
-  dropZone.classList.add("dragging");
-});
+  dropZone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    dropZone.classList.add("dragging");
+  });
 
-dropZone.addEventListener("dragleave", () => {
-  dropZone.classList.remove("dragging");
-});
+  dropZone.addEventListener("dragleave", () => {
+    dropZone.classList.remove("dragging");
+  });
 
-dropZone.addEventListener("drop", (event) => {
-  event.preventDefault();
-  dropZone.classList.remove("dragging");
-  handleFiles(event.dataTransfer.files);
-});
+  dropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("dragging");
+    handler(event.dataTransfer.files);
+  });
 
-dropZone.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" || event.key === " ") {
-    fileInput.click();
-  }
-});
+  dropZone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      input.click();
+    }
+  });
+}
 
-exportYamlButton.addEventListener("click", exportYaml);
+bindDropZone(elements.templateDropZone, elements.templateFileInput, handleTemplateFiles);
+bindDropZone(elements.assetDropZone, elements.assetFileInput, handleAssetFiles);
+
+elements.stepButtons.forEach((button) => {
+  button.addEventListener("click", () => setStep(button.dataset.stepButton));
+});
+elements.continueToAssetsButton.addEventListener("click", () => setStep("assets"));
+elements.continueToConfigureButton.addEventListener("click", () => setStep("configure"));
+elements.confirmAssetsButton.addEventListener("click", confirmAssets);
+elements.exportYamlButton.addEventListener("click", exportYaml);
 document.addEventListener("mouseup", endSelection);
 document.addEventListener("copy", copySelection);
 
-initSheet();
-renderTemplates();
-renderPreview();
+renderAll();
