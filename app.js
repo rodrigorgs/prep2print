@@ -1265,29 +1265,114 @@ async function buildGeneratedSheetSvg(workingSheet, side, addWarning) {
 }
 
 function hideGeneratedSheetPrintGuides(documentSvg) {
+  const classStrokes = collectSvgClassStrokes(documentSvg);
+  const inheritedStrokes = new Map();
+
   for (const element of documentSvg.querySelectorAll("*")) {
-    if (hasPrintGuideStroke(element)) {
+    const stroke = getEffectiveSvgStroke(element, classStrokes, inheritedStrokes);
+    if (isRenderableSvgElement(element) && isPrintGuideStrokeColor(stroke)) {
       element.setAttribute("display", "none");
     }
   }
 }
 
-function hasPrintGuideStroke(element) {
-  const stroke = element.getAttribute("stroke") || "";
-  if (isPrintGuideStrokeColor(stroke)) {
-    return true;
+function collectSvgClassStrokes(documentSvg) {
+  const classStrokes = new Map();
+
+  for (const style of documentSvg.querySelectorAll("style")) {
+    const css = style.textContent || "";
+    for (const match of css.matchAll(/([^{}]+)\{([^{}]+)\}/g)) {
+      const selectors = match[1].split(",").map((selector) => selector.trim());
+      const declarations = parseStyleDeclarations(match[2]);
+      const stroke = declarations.get("stroke");
+      if (!stroke) {
+        continue;
+      }
+
+      selectors.forEach((selector) => {
+        const classMatch = selector.match(/\.([A-Za-z0-9_-]+)/);
+        if (classMatch) {
+          classStrokes.set(classMatch[1], stroke);
+        }
+      });
+    }
   }
 
-  const style = element.getAttribute("style") || "";
-  return style
+  return classStrokes;
+}
+
+function getEffectiveSvgStroke(element, classStrokes, inheritedStrokes) {
+  if (inheritedStrokes.has(element)) {
+    return inheritedStrokes.get(element);
+  }
+
+  const inherited =
+    element.parentElement && element.parentElement.localName?.toLowerCase() !== "svg"
+      ? getEffectiveSvgStroke(element.parentElement, classStrokes, inheritedStrokes)
+      : "";
+  const classStroke = getClassStroke(element, classStrokes);
+  const attributeStroke = element.getAttribute("stroke") || "";
+  const inlineStroke = parseStyleDeclarations(element.getAttribute("style") || "").get("stroke") || "";
+  const stroke = inlineStroke || classStroke || attributeStroke || inherited;
+
+  inheritedStrokes.set(element, stroke);
+  return stroke;
+}
+
+function getClassStroke(element, classStrokes) {
+  return String(element.getAttribute("class") || "")
+    .split(/\s+/)
+    .map((className) => classStrokes.get(className))
+    .find(Boolean) || "";
+}
+
+function parseStyleDeclarations(styleText) {
+  const declarations = new Map();
+
+  String(styleText || "")
     .split(";")
-    .map((declaration) => declaration.split(":").map((part) => part.trim()))
-    .some(([property, value]) => property?.toLowerCase() === "stroke" && isPrintGuideStrokeColor(value));
+    .forEach((declaration) => {
+      const separator = declaration.indexOf(":");
+      if (separator < 0) {
+        return;
+      }
+
+      declarations.set(
+        declaration.slice(0, separator).trim().toLowerCase(),
+        declaration.slice(separator + 1).trim(),
+      );
+    });
+
+  return declarations;
+}
+
+function isRenderableSvgElement(element) {
+  return [
+    "circle",
+    "ellipse",
+    "line",
+    "path",
+    "polygon",
+    "polyline",
+    "rect",
+    "text",
+    "tspan",
+    "use",
+  ].includes(element.localName?.toLowerCase());
 }
 
 function isPrintGuideStrokeColor(value) {
-  const color = String(value || "").trim().toLowerCase().replace(/\s+/g, "");
-  return color === "#123456" || color === "rgb(18,52,86)";
+  const color = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  return (
+    color === "123456" ||
+    color === "#123456" ||
+    color === "#123456ff" ||
+    color === "rgb(18,52,86)" ||
+    color === "rgba(18,52,86,1)"
+  );
 }
 
 function exportGeneratedSheetsPdf() {
