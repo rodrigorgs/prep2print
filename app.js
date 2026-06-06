@@ -1265,22 +1265,20 @@ async function buildGeneratedSheetSvg(workingSheet, side, addWarning) {
 }
 
 function hideGeneratedSheetPrintGuides(documentSvg) {
-  const classPaints = collectSvgClassPaints(documentSvg);
+  const stylePaintRules = collectSvgStylePaintRules(documentSvg);
   const inheritedPaints = new Map();
 
   for (const element of documentSvg.querySelectorAll("*")) {
-    const paint = getEffectiveSvgPaint(element, classPaints, inheritedPaints);
-    if (
-      isRenderableSvgElement(element) &&
-      (isPrintGuideColor(paint.stroke) || isPrintGuideColor(paint.fill))
-    ) {
+    const paint = getEffectiveSvgPaint(element, stylePaintRules, inheritedPaints);
+    if (isPrintGuidePaint(paint.stroke, paint.color) || isPrintGuidePaint(paint.fill, paint.color)) {
       element.setAttribute("display", "none");
+      element.setAttribute("visibility", "hidden");
     }
   }
 }
 
-function collectSvgClassPaints(documentSvg) {
-  const classPaints = new Map();
+function collectSvgStylePaintRules(documentSvg) {
+  const rules = [];
 
   for (const style of documentSvg.querySelectorAll("style")) {
     const css = style.textContent || "";
@@ -1290,65 +1288,75 @@ function collectSvgClassPaints(documentSvg) {
       const paint = {
         stroke: declarations.get("stroke") || "",
         fill: declarations.get("fill") || "",
+        color: declarations.get("color") || "",
       };
 
-      if (!paint.stroke && !paint.fill) {
+      if (!paint.stroke && !paint.fill && !paint.color) {
         continue;
       }
 
-      selectors.forEach((selector) => {
-        const classMatch = selector.match(/\.([A-Za-z0-9_-]+)/);
-        if (classMatch) {
-          classPaints.set(classMatch[1], paint);
-        }
-      });
+      rules.push({ selectors, paint });
     }
   }
 
-  return classPaints;
+  return rules;
 }
 
-function getEffectiveSvgPaint(element, classPaints, inheritedPaints) {
+function getEffectiveSvgPaint(element, stylePaintRules, inheritedPaints) {
   if (inheritedPaints.has(element)) {
     return inheritedPaints.get(element);
   }
 
   const inherited =
     element.parentElement && element.parentElement.localName?.toLowerCase() !== "svg"
-      ? getEffectiveSvgPaint(element.parentElement, classPaints, inheritedPaints)
-      : { stroke: "", fill: "" };
-  const classPaint = getClassPaint(element, classPaints);
+      ? getEffectiveSvgPaint(element.parentElement, stylePaintRules, inheritedPaints)
+      : { stroke: "", fill: "", color: "" };
+  const stylesheetPaint = getStylesheetPaint(element, stylePaintRules);
   const inlineDeclarations = parseStyleDeclarations(element.getAttribute("style") || "");
   const paint = {
     stroke:
       inlineDeclarations.get("stroke") ||
-      classPaint.stroke ||
+      stylesheetPaint.stroke ||
       element.getAttribute("stroke") ||
       inherited.stroke,
     fill:
       inlineDeclarations.get("fill") ||
-      classPaint.fill ||
+      stylesheetPaint.fill ||
       element.getAttribute("fill") ||
       inherited.fill,
+    color:
+      inlineDeclarations.get("color") ||
+      stylesheetPaint.color ||
+      element.getAttribute("color") ||
+      inherited.color,
   };
 
   inheritedPaints.set(element, paint);
   return paint;
 }
 
-function getClassPaint(element, classPaints) {
-  const paint = { stroke: "", fill: "" };
+function getStylesheetPaint(element, stylePaintRules) {
+  const paint = { stroke: "", fill: "", color: "" };
 
-  String(element.getAttribute("class") || "")
-    .split(/\s+/)
-    .map((className) => classPaints.get(className))
-    .filter(Boolean)
-    .forEach((classPaint) => {
-      paint.stroke = classPaint.stroke || paint.stroke;
-      paint.fill = classPaint.fill || paint.fill;
-    });
+  stylePaintRules.forEach((rule) => {
+    if (!rule.selectors.some((selector) => safeMatches(element, selector))) {
+      return;
+    }
+
+    paint.stroke = rule.paint.stroke || paint.stroke;
+    paint.fill = rule.paint.fill || paint.fill;
+    paint.color = rule.paint.color || paint.color;
+  });
 
   return paint;
+}
+
+function safeMatches(element, selector) {
+  try {
+    return element.matches(selector);
+  } catch {
+    return false;
+  }
 }
 
 function parseStyleDeclarations(styleText) {
@@ -1371,19 +1379,13 @@ function parseStyleDeclarations(styleText) {
   return declarations;
 }
 
-function isRenderableSvgElement(element) {
-  return [
-    "circle",
-    "ellipse",
-    "line",
-    "path",
-    "polygon",
-    "polyline",
-    "rect",
-    "text",
-    "tspan",
-    "use",
-  ].includes(element.localName?.toLowerCase());
+function isPrintGuidePaint(value, currentColor = "") {
+  const paint = String(value || "").trim().toLowerCase();
+  if (paint === "currentcolor") {
+    return isPrintGuideColor(currentColor);
+  }
+
+  return isPrintGuideColor(paint);
 }
 
 function isPrintGuideColor(value) {
