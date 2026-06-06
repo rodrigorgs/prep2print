@@ -1,6 +1,6 @@
 const assetColumns = ["File Name", "Rows", "Columns", "Images"];
 const imageColumns = ["Asset", "Index", "Alias"];
-const cardColumns = ["Front", "Back", "Quantity", "Template", "Placeholder"];
+const cardColumns = ["Front", "Back", "Qty", "Template", "Placeholder"];
 
 const state = {
   currentStep: "templates",
@@ -168,13 +168,16 @@ function parseSvgFile(file, text) {
 }
 
 function getPlaceholderName(image, index) {
-  const label =
-    image.getAttribute("id") ||
-    image.getAttribute("inkscape:label") ||
-    image.getAttributeNS("http://www.inkscape.org/namespaces/inkscape", "label") ||
+  const href =
     image.getAttribute("href") ||
     image.getAttribute("xlink:href") ||
     image.getAttributeNS("http://www.w3.org/1999/xlink", "href") ||
+    "";
+  const label =
+    href ||
+    image.getAttribute("id") ||
+    image.getAttribute("inkscape:label") ||
+    image.getAttributeNS("http://www.inkscape.org/namespaces/inkscape", "label") ||
     "";
   const clean = label.split("/").pop().replace(/\.[^.]+$/, "").trim();
   return clean || `image_${String(index + 1).padStart(2, "0")}`;
@@ -1327,7 +1330,7 @@ function hideAutocomplete() {
 }
 
 function setCardPreviewZoom(nextZoom) {
-  state.cardPreview.zoom = Math.max(0.25, Math.min(4, nextZoom));
+  state.cardPreview.zoom = Math.max(0.5, Math.min(16, nextZoom));
   applyCardPreviewTransform();
 }
 
@@ -1371,7 +1374,7 @@ function pasteCells(event) {
   }
 
   const text = event.clipboardData.getData("text/plain");
-  if (!text.includes("\t") && !text.includes("\n")) {
+  if (!text) {
     return;
   }
 
@@ -1388,6 +1391,15 @@ function pasteCells(event) {
   const columns = getSheetColumns(sheetName);
   const startRow = Number(target.dataset.row);
   const startCol = Number(target.dataset.col);
+  const isSingleValue = !text.includes("\t") && !text.includes("\n");
+
+  if (isSingleValue && state.selection?.sheet === sheetName) {
+    pasteSingleValueAcrossSelection(sheetName, text);
+    renderAll();
+    focusCell(sheetName, startRow, startCol);
+    return;
+  }
+
   const rows = text.replace(/\r/g, "").split("\n").filter((row) => row.length);
 
   rows.forEach((rowText, rowOffset) => {
@@ -1435,6 +1447,58 @@ function pasteCells(event) {
     `.sheet td[data-sheet="${sheetName}"][data-row="${startRow}"][data-col="${startCol}"]`,
   );
   nextCell?.focus();
+}
+
+function pasteSingleValueAcrossSelection(sheetName, value) {
+  const range = normalizeSelection(state.selection);
+  const touchedRows = new Set();
+
+  for (let row = range.startRow; row <= range.endRow; row += 1) {
+    if (!isSheetRowInBounds(sheetName, row)) {
+      continue;
+    }
+
+    for (let col = range.startCol; col <= range.endCol; col += 1) {
+      if (col >= getSheetColumns(sheetName).length || isReadOnlyCell(sheetName, col)) {
+        continue;
+      }
+      state.sheets[sheetName][row][col] = value;
+      touchedRows.add(row);
+    }
+  }
+
+  for (const row of touchedRows) {
+    syncSheetRow(sheetName, row);
+  }
+}
+
+function isSheetRowInBounds(sheetName, row) {
+  if (sheetName === "assets") {
+    return row < state.assets.length;
+  }
+  if (sheetName === "images") {
+    return row < state.images.length;
+  }
+  if (sheetName === "cards") {
+    return row < state.cards.length;
+  }
+  return row < state.sheets[sheetName].length;
+}
+
+function syncSheetRow(sheetName, row) {
+  if (sheetName === "assets") {
+    state.confirmedAssets = false;
+    state.confirmedImages = false;
+    syncAssetFromSheet(row);
+  }
+  if (sheetName === "images") {
+    state.confirmedImages = false;
+    syncImageFromSheet(row);
+  }
+  if (sheetName === "cards") {
+    state.confirmedCards = false;
+    syncCardFromSheet(row);
+  }
 }
 
 function copySelection(event) {
@@ -1492,16 +1556,37 @@ function addCardRow() {
 }
 
 function removeSelectedCardRow() {
-  const index = state.cards.findIndex((card) => card.id === state.selectedCardId);
-  if (index === -1) {
+  const rowsToRemove = getSelectedCardRows();
+  if (!rowsToRemove.length) {
     return;
   }
 
-  state.cards.splice(index, 1);
-  state.selectedCardId = state.cards[Math.min(index, state.cards.length - 1)]?.id || null;
+  for (const index of [...rowsToRemove].reverse()) {
+    state.cards.splice(index, 1);
+  }
+
+  const nextIndex = Math.min(rowsToRemove[0], state.cards.length - 1);
+  state.selectedCardId = state.cards[nextIndex]?.id || null;
   state.confirmedCards = false;
+  state.selection = null;
   syncCardSheet();
   renderAll();
+}
+
+function getSelectedCardRows() {
+  if (state.selection?.sheet === "cards") {
+    const range = normalizeSelection(state.selection);
+    const rows = [];
+    for (let row = range.startRow; row <= range.endRow; row += 1) {
+      if (state.cards[row]) {
+        rows.push(row);
+      }
+    }
+    return rows;
+  }
+
+  const index = state.cards.findIndex((card) => card.id === state.selectedCardId);
+  return index === -1 ? [] : [index];
 }
 
 function exportYaml() {
@@ -1688,9 +1773,9 @@ elements.confirmAssetsButton.addEventListener("click", confirmAssets);
 elements.confirmImagesButton.addEventListener("click", confirmImages);
 elements.addCardButton.addEventListener("click", addCardRow);
 elements.removeCardButton.addEventListener("click", removeSelectedCardRow);
-elements.zoomOutButton.addEventListener("click", () => setCardPreviewZoom(state.cardPreview.zoom - 0.1));
+elements.zoomOutButton.addEventListener("click", () => setCardPreviewZoom(state.cardPreview.zoom - 0.5));
 elements.zoomResetButton.addEventListener("click", resetCardPreviewTransform);
-elements.zoomInButton.addEventListener("click", () => setCardPreviewZoom(state.cardPreview.zoom + 0.1));
+elements.zoomInButton.addEventListener("click", () => setCardPreviewZoom(state.cardPreview.zoom + 0.5));
 elements.cardPreviewViewport.addEventListener("mousedown", startCardPreviewPan);
 document.addEventListener("mousemove", moveCardPreviewPan);
 document.addEventListener("mouseup", endCardPreviewPan);

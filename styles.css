@@ -420,7 +420,7 @@ input {
 }
 
 .card-sheet {
-  min-width: 780px;
+  min-width: 700px;
 }
 
 .asset-sheet th:nth-child(3),
@@ -431,6 +431,10 @@ input {
 
 .image-sheet th:nth-child(3) {
   width: 72px;
+}
+
+.card-sheet th:nth-child(4) {
+  width: 58px;
 }
 
 .sheet td {
@@ -479,6 +483,10 @@ input {
   grid-template-columns: minmax(340px, 460px) minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+}
+
+.cards-view {
+  grid-template-columns: minmax(760px, 1fr) minmax(320px, 0.8fr);
 }
 
 .asset-preview img {
