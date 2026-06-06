@@ -75,6 +75,8 @@ const elements = {
   zoomResetButton: document.querySelector("#zoomResetButton"),
   zoomInButton: document.querySelector("#zoomInButton"),
   autocompleteMenu: document.querySelector("#autocompleteMenu"),
+  importYamlButton: document.querySelector("#importYamlButton"),
+  importYamlInput: document.querySelector("#importYamlInput"),
   exportYamlButton: document.querySelector("#exportYamlButton"),
 };
 
@@ -567,7 +569,7 @@ function renderAssetUploadPreview() {
   }`;
   elements.assetUploadPreview.innerHTML = `<img alt="${escapeHtml(
     selected.fileName,
-  )}" src="${selected.objectUrl}" />`;
+  )}" src="${getAssetSource(selected)}" />`;
 }
 
 function renderAssetConfigPreview() {
@@ -611,7 +613,7 @@ function buildAssetGrid(asset) {
       role="img"
       aria-label="${escapeHtml(asset.fileName)} sliced preview"
     >
-      <img class="asset-stage-image" alt="" src="${asset.objectUrl}" />
+      <img class="asset-stage-image" alt="" src="${getAssetSource(asset)}" />
       <div class="asset-grid-overlay" style="--grid-cols: ${cols}; --grid-rows: ${rows};">
         ${tiles.join("")}
       </div>
@@ -619,11 +621,15 @@ function buildAssetGrid(asset) {
   `;
 }
 
+function getAssetSource(asset) {
+  return asset?.objectUrl || asset?.dataUrl || "";
+}
+
 function getSelectedAsset() {
   return state.assets.find((asset) => asset.id === state.selectedAssetId);
 }
 
-function renderImageReviewPreview() {
+async function renderImageReviewPreview() {
   const selected = getSelectedImage();
 
   if (!selected) {
@@ -640,27 +646,43 @@ function renderImageReviewPreview() {
   elements.imageReviewMeta.textContent = state.confirmedImages
     ? "Images confirmed for the next project step."
     : `${selected.assetFileName} · image ${selected.index + 1}`;
-  elements.imageReviewPreview.innerHTML = asset
-    ? buildImageSlice(selected, asset)
-    : '<div class="empty-preview">Asset missing</div>';
+
+  if (!asset) {
+    elements.imageReviewPreview.innerHTML = '<div class="empty-preview">Asset missing</div>';
+    return;
+  }
+
+  const selectedId = selected.id;
+  elements.imageReviewPreview.innerHTML = '<div class="empty-preview">Loading image...</div>';
+
+  try {
+    const preview = await buildImageSlice(selected, asset);
+    if (state.selectedImageId === selectedId) {
+      elements.imageReviewPreview.innerHTML = preview;
+    }
+  } catch {
+    if (state.selectedImageId === selectedId) {
+      elements.imageReviewPreview.innerHTML =
+        '<div class="empty-preview">Image could not be loaded</div>';
+    }
+  }
 }
 
-function buildImageSlice(image, asset) {
+async function buildImageSlice(image, asset) {
   const cols = Math.max(1, asset.columns);
   const rows = Math.max(1, asset.rows);
   const tileWidth = asset.width ? asset.width / cols : 1;
   const tileHeight = asset.height ? asset.height / rows : 1;
   const ratio = tileWidth / tileHeight;
-  const x = cols === 1 ? "0%" : `${(image.col / (cols - 1)) * 100}%`;
-  const y = rows === 1 ? "0%" : `${(image.row / (rows - 1)) * 100}%`;
+  const source = await getImageSliceDataUrl(image);
 
   return `
-    <div
+    <img
       class="image-slice-stage"
-      style="--slice-ratio: ${ratio}; --grid-cols: ${cols}; --grid-rows: ${rows}; --slice-x: ${x}; --slice-y: ${y}; --asset-image: url('${asset.objectUrl.replace(/'/g, "%27")}');"
-      role="img"
-      aria-label="${escapeHtml(image.alias)}"
-    ></div>
+      style="--slice-ratio: ${ratio};"
+      alt="${escapeHtml(image.alias)}"
+      src="${source}"
+    />
   `;
 }
 
@@ -765,7 +787,12 @@ async function getImageSliceDataUrl(image) {
 
   const cols = Math.max(1, asset.columns);
   const rows = Math.max(1, asset.rows);
-  const source = await loadImageElement(asset.objectUrl);
+  const assetSource = getAssetSource(asset);
+  if (!assetSource) {
+    throw new Error("Asset image data is missing.");
+  }
+
+  const source = await loadImageElement(assetSource);
   const sourceWidth = asset.width || source.naturalWidth || source.width || 1;
   const sourceHeight = asset.height || source.naturalHeight || source.height || 1;
   const tileWidth = sourceWidth / cols;
@@ -1646,6 +1673,250 @@ function exportYaml() {
   downloadFile("prep2print-project.yaml", yaml, "application/x-yaml");
 }
 
+async function handleYamlImport(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    const project = parseYaml(text);
+    await importProject(project);
+  } catch (error) {
+    alert(`Could not import YAML: ${error.message}`);
+  } finally {
+    event.target.value = "";
+  }
+}
+
+async function importProject(project) {
+  resetProjectState();
+
+  state.confirmedAssets = Boolean(project.confirmedAssets);
+  state.confirmedImages = Boolean(project.confirmedImages);
+  state.confirmedCards = Boolean(project.confirmedCards);
+
+  state.templates = (project.templates || []).map((template) =>
+    restoreTemplate(template),
+  );
+
+  state.assets = await Promise.all(
+    (project.assets || []).map(async (asset) => {
+      const objectUrl = asset.dataUrl || "";
+      const restored = {
+        id: crypto.randomUUID(),
+        fileName: asset.fileName || "asset",
+        type: asset.type || "",
+        size: Number(asset.size) || 0,
+        uploadedAt: asset.uploadedAt || new Date().toISOString(),
+        dataUrl: asset.dataUrl || "",
+        objectUrl,
+        rows: clampPositiveInteger(asset.rows, 1),
+        columns: clampPositiveInteger(asset.columns, 1),
+        imageCount: clampPositiveInteger(asset.imageCount, 1),
+        width: Number(asset.width) || 0,
+        height: Number(asset.height) || 0,
+        status: "Ready",
+      };
+
+      if ((!restored.width || !restored.height) && objectUrl) {
+        try {
+          const dimensions = await loadImageDimensions(objectUrl);
+          restored.width = dimensions.width;
+          restored.height = dimensions.height;
+        } catch {
+          restored.status = "Error: The image could not be loaded.";
+        }
+      }
+
+      return restored;
+    }),
+  );
+
+  restoreAssetSheet(project.sheets?.assets);
+  restoreImages(project.images || []);
+  restoreImageSheet(project.sheets?.images);
+  restoreCards(project.cards || []);
+  restoreCardSheet(project.sheets?.cards);
+
+  state.selectedTemplateId = state.templates[0]?.id || null;
+  state.selectedAssetId = state.assets[0]?.id || null;
+  state.selectedImageId = state.images[0]?.id || null;
+  state.selectedCardId = state.cards[0]?.id || null;
+
+  renderAll();
+  setStep(canOpenStep(project.currentStep) ? project.currentStep : getLatestAvailableStep());
+}
+
+function resetProjectState() {
+  state.currentStep = "templates";
+  state.templates = [];
+  state.selectedTemplateId = null;
+  state.assets = [];
+  state.selectedAssetId = null;
+  state.images = [];
+  state.selectedImageId = null;
+  state.cards = [];
+  state.selectedCardId = null;
+  state.confirmedAssets = false;
+  state.confirmedImages = false;
+  state.confirmedCards = false;
+  state.sheets = {
+    assets: createSheet(assetColumns, 0),
+    images: createSheet(imageColumns, 0),
+    cards: createSheet(cardColumns, 0),
+  };
+  state.selection = null;
+  state.isSelecting = false;
+  state.editingCell = null;
+  hideAutocomplete();
+  resetCardPreviewTransform();
+}
+
+function restoreTemplate(template) {
+  const svgText = template.svg || "";
+  let parsed = {
+    imageCount: Number(template.imageCount) || 0,
+    placeholders: template.placeholders || [],
+    width: template.width || "",
+    height: template.height || "",
+    viewBox: template.viewBox || "",
+  };
+
+  if (svgText && (!parsed.placeholders.length || !parsed.imageCount)) {
+    try {
+      const documentSvg = new DOMParser().parseFromString(svgText, "image/svg+xml");
+      const svg = documentSvg.querySelector("svg");
+      const images = Array.from(svg?.querySelectorAll("image") || []);
+      parsed = {
+        imageCount: images.length,
+        placeholders: images.map((image, index) => getPlaceholderName(image, index)),
+        width: svg?.getAttribute("width") || parsed.width,
+        height: svg?.getAttribute("height") || parsed.height,
+        viewBox: svg?.getAttribute("viewBox") || parsed.viewBox,
+      };
+    } catch {
+      // Keep serialized YAML values when SVG parsing is not available.
+    }
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    alias: template.alias || stripExtension(template.fileName || "template"),
+    fileName: template.fileName || "template.svg",
+    size: Number(template.size) || 0,
+    uploadedAt: template.uploadedAt || new Date().toISOString(),
+    imageCount: parsed.imageCount,
+    placeholders: parsed.placeholders,
+    width: parsed.width,
+    height: parsed.height,
+    viewBox: parsed.viewBox,
+    svgText,
+  };
+}
+
+function restoreImages(images) {
+  const assetsByFileName = new Map(state.assets.map((asset) => [asset.fileName, asset]));
+  state.images = images.map((image) => {
+    const asset = assetsByFileName.get(image.assetFileName) || state.assets[0];
+    const index = Math.max(0, Number(image.index || 1) - 1);
+    const columns = Math.max(1, asset?.columns || 1);
+    return {
+      id: asset ? `${asset.id}:${index}` : crypto.randomUUID(),
+      assetId: asset?.id || "",
+      assetFileName: image.assetFileName || asset?.fileName || "",
+      index,
+      row: Math.max(0, Number(image.row || Math.floor(index / columns) + 1) - 1),
+      col: Math.max(0, Number(image.column || (index % columns) + 1) - 1),
+      alias: image.alias || "",
+    };
+  });
+
+  if (!state.images.length && state.assets.length) {
+    syncImagesFromAssets();
+  } else {
+    syncImageSheet();
+  }
+}
+
+function restoreCards(cards) {
+  state.cards = cards.map((card) => ({
+    id: crypto.randomUUID(),
+    imageId: getImageByAlias(card.frontAlias)?.id || "",
+    frontAlias: card.frontAlias || "",
+    backAlias: card.backAlias || "",
+    quantity: clampPositiveInteger(card.quantity, 1),
+    templateAlias: card.templateAlias || getDefaultTemplateAlias(),
+    placeholderName: card.placeholderName || getDefaultPlaceholder(card.templateAlias),
+  }));
+
+  if (!state.cards.length && state.images.length) {
+    syncCardsFromImages();
+  } else {
+    syncCardSheet();
+  }
+}
+
+function restoreAssetSheet(rows) {
+  if (!isValidSheet(rows, assetColumns.length)) {
+    syncAssetSheet();
+    return;
+  }
+
+  state.sheets.assets = normalizeSheet(rows, assetColumns.length).slice(0, state.assets.length);
+  state.sheets.assets.forEach((_, index) => syncAssetFromSheet(index));
+}
+
+function restoreImageSheet(rows) {
+  if (!isValidSheet(rows, imageColumns.length)) {
+    syncImageSheet();
+    return;
+  }
+
+  state.sheets.images = normalizeSheet(rows, imageColumns.length).slice(0, state.images.length);
+  state.sheets.images.forEach((_, index) => syncImageFromSheet(index));
+}
+
+function restoreCardSheet(rows) {
+  if (!isValidSheet(rows, cardColumns.length)) {
+    syncCardSheet();
+    return;
+  }
+
+  state.sheets.cards = normalizeSheet(rows, cardColumns.length).slice(0, state.cards.length);
+  state.sheets.cards.forEach((_, index) => syncCardFromSheet(index));
+}
+
+function isValidSheet(rows, length) {
+  return (
+    Array.isArray(rows) &&
+    rows.every((row) => Array.isArray(row) && row.length <= length)
+  );
+}
+
+function normalizeSheet(rows, length) {
+  return rows.map((row) =>
+    Array.from({ length }, (_, index) => String(row[index] ?? "")),
+  );
+}
+
+function getLatestAvailableStep() {
+  if (canOpenStep("cards")) {
+    return "cards";
+  }
+  if (canOpenStep("review")) {
+    return "review";
+  }
+  if (canOpenStep("configure")) {
+    return "configure";
+  }
+  if (canOpenStep("assets")) {
+    return "assets";
+  }
+  return "templates";
+}
+
 function toYaml(value, indent = 0) {
   const spaces = " ".repeat(indent);
 
@@ -1676,6 +1947,180 @@ function toYaml(value, indent = 0) {
   }
 
   return formatYamlScalar(value, indent);
+}
+
+function parseYaml(text) {
+  const lines = preprocessYamlLines(text);
+  const [value] = parseYamlBlock(lines, 0, 0);
+  return value || {};
+}
+
+function preprocessYamlLines(text) {
+  const sourceLines = text.replace(/\r/g, "").split("\n");
+  const lines = [];
+
+  for (let index = 0; index < sourceLines.length; index += 1) {
+    const raw = sourceLines[index];
+    if (!raw.trim()) {
+      continue;
+    }
+
+    const indent = raw.match(/^ */)[0].length;
+    const content = raw.trimEnd().slice(indent);
+
+    if (content.endsWith(": |") || content === "|") {
+      const keyPrefix = content === "|" ? "|" : content.slice(0, -2).trimEnd();
+      const blockIndent = sourceLines[index + 1]?.match(/^ */)?.[0].length ?? indent + 2;
+      const block = [];
+
+      while (index + 1 < sourceLines.length) {
+        const next = sourceLines[index + 1];
+        if (next.trim() && next.match(/^ */)[0].length < blockIndent) {
+          break;
+        }
+        index += 1;
+        block.push(next.slice(Math.min(blockIndent, next.length)));
+      }
+
+      lines.push({
+        indent,
+        text: content === "|" ? JSON.stringify(block.join("\n")) : `${keyPrefix} ${JSON.stringify(block.join("\n"))}`,
+      });
+    } else {
+      lines.push({ indent, text: content.trim() });
+    }
+  }
+
+  return lines;
+}
+
+function parseYamlBlock(lines, startIndex, indent) {
+  if (startIndex >= lines.length) {
+    return [{}, startIndex];
+  }
+
+  if (lines[startIndex].text.startsWith("- ")) {
+    return parseYamlArray(lines, startIndex, indent);
+  }
+  return parseYamlObject(lines, startIndex, indent);
+}
+
+function parseYamlObject(lines, startIndex, indent) {
+  const object = {};
+  let index = startIndex;
+
+  while (index < lines.length && lines[index].indent === indent && !lines[index].text.startsWith("- ")) {
+    const { key, value } = splitYamlKeyValue(lines[index].text);
+    if (value === "") {
+      const [nested, nextIndex] = parseYamlBlock(lines, index + 1, indent + 2);
+      object[key] = nested;
+      index = nextIndex;
+    } else {
+      object[key] = parseYamlScalar(value);
+      index += 1;
+    }
+  }
+
+  return [object, index];
+}
+
+function parseYamlArray(lines, startIndex, indent) {
+  const array = [];
+  let index = startIndex;
+
+  while (index < lines.length && lines[index].indent === indent && lines[index].text.startsWith("- ")) {
+    const itemText = lines[index].text.slice(2);
+
+    if (!itemText) {
+      const [nested, nextIndex] = parseYamlBlock(lines, index + 1, indent + 2);
+      array.push(nested);
+      index = nextIndex;
+    } else if (itemText.startsWith("- ")) {
+      const nested = [parseYamlScalar(itemText.slice(2))];
+      index += 1;
+
+      while (
+        index < lines.length &&
+        lines[index].indent === indent + 2 &&
+        lines[index].text.startsWith("- ")
+      ) {
+        nested.push(parseYamlScalar(lines[index].text.slice(2)));
+        index += 1;
+      }
+
+      array.push(nested);
+    } else if (itemText.includes(":")) {
+      const { key, value } = splitYamlKeyValue(itemText);
+      const item = {};
+      if (value === "") {
+        const [nested, nextIndex] = parseYamlBlock(lines, index + 1, indent + 2);
+        item[key] = nested;
+        index = nextIndex;
+      } else {
+        item[key] = parseYamlScalar(value);
+        index += 1;
+      }
+
+      while (index < lines.length && lines[index].indent === indent + 2 && !lines[index].text.startsWith("- ")) {
+        const next = splitYamlKeyValue(lines[index].text);
+        if (next.value === "") {
+          const [nested, nextIndex] = parseYamlBlock(lines, index + 1, indent + 4);
+          item[next.key] = nested;
+          index = nextIndex;
+        } else {
+          item[next.key] = parseYamlScalar(next.value);
+          index += 1;
+        }
+      }
+
+      array.push(item);
+    } else {
+      array.push(parseYamlScalar(itemText));
+      index += 1;
+    }
+  }
+
+  return [array, index];
+}
+
+function splitYamlKeyValue(text) {
+  const separator = text.indexOf(":");
+  return {
+    key: text.slice(0, separator).trim(),
+    value: text.slice(separator + 1).trim(),
+  };
+}
+
+function parseYamlScalar(value) {
+  if (value === "null") {
+    return null;
+  }
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  if (value === "[]") {
+    return [];
+  }
+  if (value === '""') {
+    return "";
+  }
+  if (/^-?\d+(\.\d+)?$/.test(value)) {
+    return Number(value);
+  }
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("[") && value.endsWith("]"))
+  ) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
 }
 
 function isScalar(value) {
@@ -1779,6 +2224,8 @@ elements.zoomInButton.addEventListener("click", () => setCardPreviewZoom(state.c
 elements.cardPreviewViewport.addEventListener("mousedown", startCardPreviewPan);
 document.addEventListener("mousemove", moveCardPreviewPan);
 document.addEventListener("mouseup", endCardPreviewPan);
+elements.importYamlButton.addEventListener("click", () => elements.importYamlInput.click());
+elements.importYamlInput.addEventListener("change", handleYamlImport);
 elements.exportYamlButton.addEventListener("click", exportYaml);
 document.addEventListener("mouseup", endSelection);
 document.addEventListener("copy", copySelection);

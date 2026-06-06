@@ -95,6 +95,16 @@ input {
   cursor: not-allowed;
 }
 
+.topbar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.topbar-actions input {
+  display: none;
+}
+
 .button.full-width {
   width: 100%;
   margin-top: 16px;
@@ -513,15 +523,15 @@ input {
 
 .image-slice-stage {
   --slice-ratio: 1;
+  display: block;
   width: min(100%, 680px, calc((100vh - 270px) * var(--slice-ratio)));
+  height: auto;
+  max-height: calc(100vh - 270px);
   aspect-ratio: var(--slice-ratio);
   border: 1px solid rgba(37, 111, 106, 0.8);
-  background-image: var(--asset-image);
-  background-repeat: no-repeat;
-  background-size: calc(var(--grid-cols) * 100%) calc(var(--grid-rows) * 100%);
-  background-position: var(--slice-x) var(--slice-y);
   background-color: #fff;
   box-shadow: 0 8px 30px rgba(31, 45, 61, 0.18);
+  object-fit: contain;
 }
 
 .asset-stage-image {

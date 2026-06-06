@@ -14,9 +14,15 @@
             <h1>Prep2Print</h1>
             <p>Build print-to-cut projects for card and board games.</p>
           </div>
-          <button id="exportYamlButton" class="button secondary" type="button" disabled>
-            Export YAML
-          </button>
+          <div class="topbar-actions">
+            <button id="importYamlButton" class="button secondary" type="button">
+              Import YAML
+            </button>
+            <input id="importYamlInput" type="file" accept=".yaml,.yml,application/x-yaml,text/yaml,text/plain" />
+            <button id="exportYamlButton" class="button secondary" type="button" disabled>
+              Export YAML
+            </button>
+          </div>
         </header>
 
         <nav class="stepper" aria-label="Project steps">
