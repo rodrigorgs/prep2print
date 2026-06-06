@@ -1265,65 +1265,90 @@ async function buildGeneratedSheetSvg(workingSheet, side, addWarning) {
 }
 
 function hideGeneratedSheetPrintGuides(documentSvg) {
-  const classStrokes = collectSvgClassStrokes(documentSvg);
-  const inheritedStrokes = new Map();
+  const classPaints = collectSvgClassPaints(documentSvg);
+  const inheritedPaints = new Map();
 
   for (const element of documentSvg.querySelectorAll("*")) {
-    const stroke = getEffectiveSvgStroke(element, classStrokes, inheritedStrokes);
-    if (isRenderableSvgElement(element) && isPrintGuideStrokeColor(stroke)) {
+    const paint = getEffectiveSvgPaint(element, classPaints, inheritedPaints);
+    if (
+      isRenderableSvgElement(element) &&
+      (isPrintGuideColor(paint.stroke) || isPrintGuideColor(paint.fill))
+    ) {
       element.setAttribute("display", "none");
     }
   }
 }
 
-function collectSvgClassStrokes(documentSvg) {
-  const classStrokes = new Map();
+function collectSvgClassPaints(documentSvg) {
+  const classPaints = new Map();
 
   for (const style of documentSvg.querySelectorAll("style")) {
     const css = style.textContent || "";
     for (const match of css.matchAll(/([^{}]+)\{([^{}]+)\}/g)) {
       const selectors = match[1].split(",").map((selector) => selector.trim());
       const declarations = parseStyleDeclarations(match[2]);
-      const stroke = declarations.get("stroke");
-      if (!stroke) {
+      const paint = {
+        stroke: declarations.get("stroke") || "",
+        fill: declarations.get("fill") || "",
+      };
+
+      if (!paint.stroke && !paint.fill) {
         continue;
       }
 
       selectors.forEach((selector) => {
         const classMatch = selector.match(/\.([A-Za-z0-9_-]+)/);
         if (classMatch) {
-          classStrokes.set(classMatch[1], stroke);
+          classPaints.set(classMatch[1], paint);
         }
       });
     }
   }
 
-  return classStrokes;
+  return classPaints;
 }
 
-function getEffectiveSvgStroke(element, classStrokes, inheritedStrokes) {
-  if (inheritedStrokes.has(element)) {
-    return inheritedStrokes.get(element);
+function getEffectiveSvgPaint(element, classPaints, inheritedPaints) {
+  if (inheritedPaints.has(element)) {
+    return inheritedPaints.get(element);
   }
 
   const inherited =
     element.parentElement && element.parentElement.localName?.toLowerCase() !== "svg"
-      ? getEffectiveSvgStroke(element.parentElement, classStrokes, inheritedStrokes)
-      : "";
-  const classStroke = getClassStroke(element, classStrokes);
-  const attributeStroke = element.getAttribute("stroke") || "";
-  const inlineStroke = parseStyleDeclarations(element.getAttribute("style") || "").get("stroke") || "";
-  const stroke = inlineStroke || classStroke || attributeStroke || inherited;
+      ? getEffectiveSvgPaint(element.parentElement, classPaints, inheritedPaints)
+      : { stroke: "", fill: "" };
+  const classPaint = getClassPaint(element, classPaints);
+  const inlineDeclarations = parseStyleDeclarations(element.getAttribute("style") || "");
+  const paint = {
+    stroke:
+      inlineDeclarations.get("stroke") ||
+      classPaint.stroke ||
+      element.getAttribute("stroke") ||
+      inherited.stroke,
+    fill:
+      inlineDeclarations.get("fill") ||
+      classPaint.fill ||
+      element.getAttribute("fill") ||
+      inherited.fill,
+  };
 
-  inheritedStrokes.set(element, stroke);
-  return stroke;
+  inheritedPaints.set(element, paint);
+  return paint;
 }
 
-function getClassStroke(element, classStrokes) {
-  return String(element.getAttribute("class") || "")
+function getClassPaint(element, classPaints) {
+  const paint = { stroke: "", fill: "" };
+
+  String(element.getAttribute("class") || "")
     .split(/\s+/)
-    .map((className) => classStrokes.get(className))
-    .find(Boolean) || "";
+    .map((className) => classPaints.get(className))
+    .filter(Boolean)
+    .forEach((classPaint) => {
+      paint.stroke = classPaint.stroke || paint.stroke;
+      paint.fill = classPaint.fill || paint.fill;
+    });
+
+  return paint;
 }
 
 function parseStyleDeclarations(styleText) {
@@ -1361,17 +1386,16 @@ function isRenderableSvgElement(element) {
   ].includes(element.localName?.toLowerCase());
 }
 
-function isPrintGuideStrokeColor(value) {
+function isPrintGuideColor(value) {
   const color = String(value || "")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "");
   return (
-    color === "123456" ||
-    color === "#123456" ||
-    color === "#123456ff" ||
+    color.startsWith("#123456") ||
+    color.startsWith("123456") ||
     color === "rgb(18,52,86)" ||
-    color === "rgba(18,52,86,1)"
+    color.startsWith("rgba(18,52,86,")
   );
 }
 
