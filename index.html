@@ -29,6 +29,9 @@
           <button class="step-pill" type="button" data-step-button="configure" disabled>
             3. Configure Assets
           </button>
+          <button class="step-pill" type="button" data-step-button="review" disabled>
+            4. Review Images
+          </button>
         </nav>
 
         <section class="layout step-view is-active" data-step="templates">
@@ -156,12 +159,51 @@
                   Back
                 </button>
                 <button id="confirmAssetsButton" class="button" type="button" disabled>
-                  Confirm Assets
+                  Confirm & Review
                 </button>
               </div>
             </div>
             <div id="assetConfigPreview" class="svg-preview asset-config-preview">
               <div class="empty-preview">Sliced asset preview</div>
+            </div>
+          </section>
+        </section>
+
+        <section class="configure-view step-view" data-step="review" hidden>
+          <section class="sheet-band">
+            <div class="section-heading">
+              <h2>Image Sheet</h2>
+              <span>select an image row, then edit the alias</span>
+            </div>
+            <div class="sheet-wrap" aria-label="Editable image sheet">
+              <table id="imageSheet" class="sheet image-sheet">
+                <thead>
+                  <tr>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="preview-band">
+            <div class="preview-header">
+              <div>
+                <h2 id="imageReviewTitle">No image selected</h2>
+                <p id="imageReviewMeta">Click an image row to inspect it.</p>
+              </div>
+              <div class="button-row compact">
+                <button class="button secondary" type="button" data-step-button="configure">
+                  Back
+                </button>
+                <button id="confirmImagesButton" class="button" type="button" disabled>
+                  Confirm Images
+                </button>
+              </div>
+            </div>
+            <div id="imageReviewPreview" class="svg-preview asset-config-preview">
+              <div class="empty-preview">Image preview</div>
             </div>
           </section>
         </section>

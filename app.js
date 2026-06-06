@@ -1,4 +1,5 @@
 const assetColumns = ["File Name", "Rows", "Columns", "Images"];
+const imageColumns = ["Alias"];
 
 const state = {
   currentStep: "templates",
@@ -6,9 +7,13 @@ const state = {
   selectedTemplateId: null,
   assets: [],
   selectedAssetId: null,
+  images: [],
+  selectedImageId: null,
   confirmedAssets: false,
+  confirmedImages: false,
   sheets: {
     assets: createSheet(assetColumns, 0),
+    images: createSheet(imageColumns, 0),
   },
   selection: null,
   isSelecting: false,
@@ -39,6 +44,11 @@ const elements = {
   assetConfigMeta: document.querySelector("#assetConfigMeta"),
   assetConfigPreview: document.querySelector("#assetConfigPreview"),
   confirmAssetsButton: document.querySelector("#confirmAssetsButton"),
+  imageSheet: document.querySelector("#imageSheet"),
+  imageReviewTitle: document.querySelector("#imageReviewTitle"),
+  imageReviewMeta: document.querySelector("#imageReviewMeta"),
+  imageReviewPreview: document.querySelector("#imageReviewPreview"),
+  confirmImagesButton: document.querySelector("#confirmImagesButton"),
   exportYamlButton: document.querySelector("#exportYamlButton"),
 };
 
@@ -74,7 +84,10 @@ function canOpenStep(step) {
   if (step === "assets") {
     return state.templates.length > 0;
   }
-  return state.assets.length > 0;
+  if (step === "configure") {
+    return state.assets.length > 0;
+  }
+  return state.confirmedAssets && state.images.length > 0;
 }
 
 function updateStepAvailability() {
@@ -85,6 +98,7 @@ function updateStepAvailability() {
   elements.continueToAssetsButton.disabled = state.templates.length === 0;
   elements.continueToConfigureButton.disabled = state.assets.length === 0;
   elements.confirmAssetsButton.disabled = state.assets.length === 0;
+  elements.confirmImagesButton.disabled = state.images.length === 0;
   elements.exportYamlButton.disabled = state.templates.length === 0 && state.assets.length === 0;
 }
 
@@ -238,6 +252,63 @@ function syncAssetFromSheet(rowIndex) {
   row[3] = String(asset.imageCount);
 }
 
+function syncImagesFromAssets() {
+  const aliasesById = new Map(state.images.map((image) => [image.id, image.alias]));
+  const images = [];
+
+  for (const asset of state.assets) {
+    const count = Math.min(asset.imageCount, asset.rows * asset.columns);
+    const baseAlias = stripExtension(asset.fileName);
+
+    for (let index = 0; index < count; index += 1) {
+      const id = `${asset.id}:${index}`;
+      const row = Math.floor(index / asset.columns);
+      const col = index % asset.columns;
+      const defaultAlias = `${baseAlias}_${String(index + 1).padStart(2, "0")}`;
+
+      images.push({
+        id,
+        assetId: asset.id,
+        assetFileName: asset.fileName,
+        index,
+        row,
+        col,
+        alias: aliasesById.get(id) || defaultAlias,
+      });
+    }
+  }
+
+  state.images = images;
+  state.selectedImageId =
+    state.images.find((image) => image.id === state.selectedImageId)?.id ||
+    state.images[0]?.id ||
+    null;
+  syncImageSheet();
+}
+
+function syncImageSheet() {
+  state.sheets.images = state.images.map((image) => [image.alias]);
+}
+
+function syncImageFromSheet(rowIndex) {
+  const image = state.images[rowIndex];
+  if (!image) {
+    return;
+  }
+
+  const row = state.sheets.images[rowIndex];
+  image.alias = row[0] || defaultImageAlias(image);
+  row[0] = image.alias;
+}
+
+function defaultImageAlias(image) {
+  return `${stripExtension(image.assetFileName)}_${String(image.index + 1).padStart(2, "0")}`;
+}
+
+function stripExtension(fileName) {
+  return String(fileName).replace(/\.[^.]+$/, "");
+}
+
 function clampPositiveInteger(value, fallback) {
   const parsed = Number.parseInt(String(value).trim(), 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
@@ -254,6 +325,8 @@ function renderAll() {
   renderAssetUploadPreview();
   renderSheet(elements.assetSheet, "assets", assetColumns);
   renderAssetConfigPreview();
+  renderSheet(elements.imageSheet, "images", imageColumns);
+  renderImageReviewPreview();
 }
 
 function renderTemplates() {
@@ -429,6 +502,55 @@ function getSelectedAsset() {
   return state.assets.find((asset) => asset.id === state.selectedAssetId);
 }
 
+function renderImageReviewPreview() {
+  const selected = getSelectedImage();
+
+  if (!selected) {
+    elements.imageReviewTitle.textContent = "No image selected";
+    elements.imageReviewMeta.textContent = state.confirmedImages
+      ? "Images confirmed for the next project step."
+      : "Click an image row to inspect it.";
+    elements.imageReviewPreview.innerHTML = '<div class="empty-preview">Image preview</div>';
+    return;
+  }
+
+  const asset = getAssetForImage(selected);
+  elements.imageReviewTitle.textContent = selected.alias;
+  elements.imageReviewMeta.textContent = state.confirmedImages
+    ? "Images confirmed for the next project step."
+    : `${selected.assetFileName} · image ${selected.index + 1}`;
+  elements.imageReviewPreview.innerHTML = asset
+    ? buildImageSlice(selected, asset)
+    : '<div class="empty-preview">Asset missing</div>';
+}
+
+function buildImageSlice(image, asset) {
+  const cols = Math.max(1, asset.columns);
+  const rows = Math.max(1, asset.rows);
+  const tileWidth = asset.width ? asset.width / cols : 1;
+  const tileHeight = asset.height ? asset.height / rows : 1;
+  const ratio = tileWidth / tileHeight;
+  const x = cols === 1 ? "0%" : `${(image.col / (cols - 1)) * 100}%`;
+  const y = rows === 1 ? "0%" : `${(image.row / (rows - 1)) * 100}%`;
+
+  return `
+    <div
+      class="image-slice-stage"
+      style="--slice-ratio: ${ratio}; --grid-cols: ${cols}; --grid-rows: ${rows}; --slice-x: ${x}; --slice-y: ${y}; --asset-image: url('${asset.objectUrl.replace(/'/g, "%27")}');"
+      role="img"
+      aria-label="${escapeHtml(image.alias)}"
+    ></div>
+  `;
+}
+
+function getSelectedImage() {
+  return state.images.find((image) => image.id === state.selectedImageId);
+}
+
+function getAssetForImage(image) {
+  return state.assets.find((asset) => asset.id === image.assetId);
+}
+
 function sanitizeSvgForPreview(svgText) {
   const parser = new DOMParser();
   const documentSvg = parser.parseFromString(svgText, "image/svg+xml");
@@ -458,6 +580,9 @@ function renderSheet(table, sheetName, columns) {
   state.sheets[sheetName].forEach((row, rowIndex) => {
     const tr = document.createElement("tr");
     if (sheetName === "assets" && state.assets[rowIndex]?.id === state.selectedAssetId) {
+      tr.classList.add("is-active-row");
+    }
+    if (sheetName === "images" && state.images[rowIndex]?.id === state.selectedImageId) {
       tr.classList.add("is-active-row");
     }
 
@@ -508,17 +633,24 @@ function handleCellClick(event) {
   if (sheetName === "assets" && state.assets[rowIndex]) {
     state.selectedAssetId = state.assets[rowIndex].id;
     renderAssetList();
-    updateAssetSheetActiveRow();
+    updateSheetActiveRow(elements.assetSheet, "assets");
     renderAssetConfigPreview();
+  }
+
+  if (sheetName === "images" && state.images[rowIndex]) {
+    state.selectedImageId = state.images[rowIndex].id;
+    updateSheetActiveRow(elements.imageSheet, "images");
+    renderImageReviewPreview();
   }
 }
 
-function updateAssetSheetActiveRow() {
-  elements.assetSheet.querySelectorAll("tbody tr").forEach((row, index) => {
-    row.classList.toggle(
-      "is-active-row",
-      state.assets[index]?.id === state.selectedAssetId,
-    );
+function updateSheetActiveRow(table, sheetName) {
+  table.querySelectorAll("tbody tr").forEach((row, index) => {
+    const isActive =
+      sheetName === "assets"
+        ? state.assets[index]?.id === state.selectedAssetId
+        : state.images[index]?.id === state.selectedImageId;
+    row.classList.toggle("is-active-row", isActive);
   });
 }
 
@@ -625,9 +757,16 @@ function syncCellValue(cell) {
 
   if (sheetName === "assets") {
     state.confirmedAssets = false;
+    state.confirmedImages = false;
     syncAssetFromSheet(rowIndex);
     renderAssetConfigPreview();
     renderAssetList();
+  }
+
+  if (sheetName === "images") {
+    state.confirmedImages = false;
+    syncImageFromSheet(rowIndex);
+    renderImageReviewPreview();
   }
 }
 
@@ -766,7 +905,7 @@ function pasteCells(event) {
 
   event.preventDefault();
   const sheetName = target.dataset.sheet;
-  const columns = assetColumns;
+  const columns = sheetName === "images" ? imageColumns : assetColumns;
   const startRow = Number(target.dataset.row);
   const startCol = Number(target.dataset.col);
   const rows = text.replace(/\r/g, "").split("\n").filter((row) => row.length);
@@ -776,6 +915,9 @@ function pasteCells(event) {
     const targetRow = startRow + rowOffset;
 
     if (sheetName === "assets" && targetRow >= state.assets.length) {
+      return;
+    }
+    if (sheetName === "images" && targetRow >= state.images.length) {
       return;
     }
 
@@ -792,7 +934,12 @@ function pasteCells(event) {
 
     if (sheetName === "assets") {
       state.confirmedAssets = false;
+      state.confirmedImages = false;
       syncAssetFromSheet(targetRow);
+    }
+    if (sheetName === "images") {
+      state.confirmedImages = false;
+      syncImageFromSheet(targetRow);
     }
   });
 
@@ -825,7 +972,14 @@ function copySelection(event) {
 
 function confirmAssets() {
   state.confirmedAssets = true;
-  renderAssetConfigPreview();
+  state.confirmedImages = false;
+  syncImagesFromAssets();
+  setStep("review");
+}
+
+function confirmImages() {
+  state.confirmedImages = true;
+  renderImageReviewPreview();
 }
 
 function exportYaml() {
@@ -835,6 +989,7 @@ function exportYaml() {
     exportedAt: new Date().toISOString(),
     currentStep: state.currentStep,
     confirmedAssets: state.confirmedAssets,
+    confirmedImages: state.confirmedImages,
     templates: state.templates.map((template) => ({
       fileName: template.fileName,
       size: template.size,
@@ -857,8 +1012,17 @@ function exportYaml() {
       uploadedAt: asset.uploadedAt,
       dataUrl: asset.dataUrl,
     })),
+    images: state.images.map((image) => ({
+      alias: image.alias,
+      assetFileName: image.assetFileName,
+      assetId: image.assetId,
+      index: image.index + 1,
+      row: image.row + 1,
+      column: image.col + 1,
+    })),
     sheets: {
       assets: state.sheets.assets,
+      images: state.sheets.images,
     },
   });
   downloadFile("prep2print-project.yaml", yaml, "application/x-yaml");
@@ -988,6 +1152,7 @@ elements.stepButtons.forEach((button) => {
 elements.continueToAssetsButton.addEventListener("click", () => setStep("assets"));
 elements.continueToConfigureButton.addEventListener("click", () => setStep("configure"));
 elements.confirmAssetsButton.addEventListener("click", confirmAssets);
+elements.confirmImagesButton.addEventListener("click", confirmImages);
 elements.exportYamlButton.addEventListener("click", exportYaml);
 document.addEventListener("mouseup", endSelection);
 document.addEventListener("copy", copySelection);

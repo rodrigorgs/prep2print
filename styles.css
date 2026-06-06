@@ -415,6 +415,10 @@ input {
   min-width: 420px;
 }
 
+.image-sheet {
+  min-width: 300px;
+}
+
 .asset-sheet th:nth-child(3),
 .asset-sheet th:nth-child(4),
 .asset-sheet th:nth-child(5) {
@@ -475,6 +479,19 @@ input {
   aspect-ratio: var(--asset-ratio);
   border: 1px solid rgba(37, 111, 106, 0.8);
   overflow: hidden;
+}
+
+.image-slice-stage {
+  --slice-ratio: 1;
+  width: min(100%, 680px, calc((100vh - 270px) * var(--slice-ratio)));
+  aspect-ratio: var(--slice-ratio);
+  border: 1px solid rgba(37, 111, 106, 0.8);
+  background-image: var(--asset-image);
+  background-repeat: no-repeat;
+  background-size: calc(var(--grid-cols) * 100%) calc(var(--grid-rows) * 100%);
+  background-position: var(--slice-x) var(--slice-y);
+  background-color: #fff;
+  box-shadow: 0 8px 30px rgba(31, 45, 61, 0.18);
 }
 
 .asset-stage-image {
