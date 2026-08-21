@@ -13,6 +13,7 @@ const state = {
   cards: [],
   selectedCardId: null,
   generatedSheets: [],
+  generatedSheetPreviewUrls: [],
   generationWarnings: [],
   generationRequestId: 0,
   confirmedAssets: false,
@@ -494,6 +495,7 @@ function syncCardFromSheet(rowIndex) {
 }
 
 function invalidateGeneratedSheets() {
+  revokeGeneratedSheetPreviewUrls();
   state.generatedSheets = [];
   state.generationWarnings = [];
   state.generationRequestId += 1;
@@ -1054,9 +1056,28 @@ function renderGeneratedSheetsResult() {
     return;
   }
 
-  elements.generatedSheetsGrid.innerHTML = state.generatedSheets
-    .map((sheet, index) => renderGeneratedSheetCard(sheet, index))
-    .join("");
+  revokeGeneratedSheetPreviewUrls();
+  elements.generatedSheetsGrid.replaceChildren();
+  const fragment = document.createDocumentFragment();
+
+  state.generatedSheets.forEach((sheet, index) => {
+    const wrapper = document.createElement("div");
+    const pageUrls = sheet.pages.map((page) => createSvgObjectUrl(page.svgText));
+    state.generatedSheetPreviewUrls.push(...pageUrls);
+    wrapper.innerHTML = renderGeneratedSheetCard(sheet, index, pageUrls);
+    fragment.append(...wrapper.children);
+  });
+
+  elements.generatedSheetsGrid.append(fragment);
+}
+
+function createSvgObjectUrl(svgText) {
+  return URL.createObjectURL(new Blob([svgText], { type: "image/svg+xml" }));
+}
+
+function revokeGeneratedSheetPreviewUrls() {
+  state.generatedSheetPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+  state.generatedSheetPreviewUrls = [];
 }
 
 function renderGenerationWarnings() {
@@ -1072,7 +1093,7 @@ function renderGenerationWarnings() {
     .join("");
 }
 
-function renderGeneratedSheetCard(sheet, index) {
+function renderGeneratedSheetCard(sheet, index, pageUrls) {
   return `
     <article class="generated-sheet-card">
       <header>
@@ -1084,10 +1105,12 @@ function renderGeneratedSheetCard(sheet, index) {
       <div class="generated-sheet-pages">
         ${sheet.pages
           .map(
-            (page) => `
+            (page, pageIndex) => `
               <section class="generated-sheet-page">
                 <h4>${page.side === "front" ? "Front" : "Back"}</h4>
-                <div class="generated-sheet-preview">${page.svgText}</div>
+                <div class="generated-sheet-preview">
+                  <img src="${pageUrls[pageIndex]}" alt="Sheet ${index + 1} ${page.side} preview">
+                </div>
               </section>
             `,
           )
@@ -1253,7 +1276,7 @@ async function buildGeneratedSheetSvg(workingSheet, side, addWarning) {
 
     const imageDataUrl = await getImageSliceDataUrl(image);
     imageNode.setAttribute("href", imageDataUrl);
-    imageNode.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imageDataUrl);
+    imageNode.removeAttributeNS("http://www.w3.org/1999/xlink", "href");
     replacedNodes.push(imageNode);
   }
 
@@ -1401,7 +1424,7 @@ function isPrintGuideColor(value) {
   );
 }
 
-function exportGeneratedSheetsPdf() {
+async function exportGeneratedSheetsPdf() {
   if (!state.generatedSheets.length) {
     return;
   }
@@ -1412,24 +1435,61 @@ function exportGeneratedSheetsPdf() {
     return;
   }
 
-  printWindow.document.open();
-  printWindow.document.write(buildPrintDocumentHtml());
-  printWindow.document.close();
-  printWindow.focus();
-  window.setTimeout(() => {
+  const pages = state.generatedSheets.flatMap((sheet, sheetIndex) =>
+    sheet.pages.map((page) => ({ ...page, sheetIndex })),
+  );
+  const printUrls = [];
+
+  try {
+    printWindow.document.open();
+    printWindow.document.write(buildPrintDocumentHtml());
+    printWindow.document.close();
+
+    const loadPromises = pages.map((page) => {
+      const section = printWindow.document.createElement("section");
+      section.className = "print-page";
+      section.dataset.sheet = String(page.sheetIndex + 1);
+      section.dataset.side = page.side;
+
+      const image = printWindow.document.createElement("img");
+      image.alt = `Sheet ${page.sheetIndex + 1} ${page.side}`;
+      const url = createSvgObjectUrl(page.svgText);
+      printUrls.push(url);
+      const loaded = new Promise((resolve, reject) => {
+        image.addEventListener("load", resolve, { once: true });
+        image.addEventListener(
+          "error",
+          () => reject(new Error(`Could not render sheet ${page.sheetIndex + 1} ${page.side}.`)),
+          { once: true },
+        );
+      });
+      image.src = url;
+      section.append(image);
+      printWindow.document.body.append(section);
+      return loaded;
+    });
+
+    await Promise.all(loadPromises);
+    await printWindow.document.fonts?.ready;
+    await waitForAnimationFrame(printWindow);
+    await waitForAnimationFrame(printWindow);
+
+    const cleanup = () => printUrls.forEach((url) => URL.revokeObjectURL(url));
+    printWindow.addEventListener("afterprint", cleanup, { once: true });
+    printWindow.focus();
     printWindow.print();
-  }, 300);
+  } catch (error) {
+    printUrls.forEach((url) => URL.revokeObjectURL(url));
+    printWindow.close();
+    alert(`Could not prepare PDF: ${error.message}`);
+  }
+}
+
+function waitForAnimationFrame(targetWindow) {
+  return new Promise((resolve) => targetWindow.requestAnimationFrame(resolve));
 }
 
 function buildPrintDocumentHtml() {
-  const pages = state.generatedSheets.flatMap((sheet, sheetIndex) =>
-    sheet.pages.map((page) => ({
-      ...page,
-      sheetIndex,
-      templateAlias: sheet.templateAlias,
-    })),
-  );
-
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -1453,7 +1513,7 @@ function buildPrintDocumentHtml() {
         break-after: auto;
         page-break-after: auto;
       }
-      .print-page svg {
+      .print-page img {
         display: block;
         width: 100%;
         height: auto;
@@ -1467,17 +1527,7 @@ function buildPrintDocumentHtml() {
       }
     </style>
   </head>
-  <body>
-    ${pages
-      .map(
-        (page) => `
-          <section class="print-page" data-sheet="${page.sheetIndex + 1}" data-side="${page.side}">
-            ${page.svgText}
-          </section>
-        `,
-      )
-      .join("")}
-  </body>
+  <body></body>
 </html>`;
 }
 
@@ -2484,6 +2534,7 @@ async function importProject(project) {
 }
 
 function resetProjectState() {
+  revokeGeneratedSheetPreviewUrls();
   state.currentStep = "templates";
   state.templates = [];
   state.selectedTemplateId = null;
