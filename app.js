@@ -1,5 +1,5 @@
 const assetColumns = ["File Name", "Rows", "Columns", "Images"];
-const imageColumns = ["Asset", "Index", "Alias"];
+const imageColumns = ["Asset", "Index", "Alias", "Rotation (deg)"];
 const cardColumns = ["Front", "Back", "Qty", "Template", "Placeholder"];
 
 const state = {
@@ -336,6 +336,8 @@ function clearImageSliceCacheForAsset(assetId) {
     .filter((image) => image.assetId === assetId)
     .forEach((image) => {
       delete image.sliceDataUrl;
+      delete image.rotatedSliceDataUrl;
+      delete image.rotatedSliceRotation;
     });
 }
 
@@ -385,7 +387,7 @@ function syncAssetFromSheet(rowIndex) {
 }
 
 function syncImagesFromAssets() {
-  const aliasesById = new Map(state.images.map((image) => [image.id, image.alias]));
+  const existingById = new Map(state.images.map((image) => [image.id, image]));
   const images = [];
 
   for (const asset of state.assets) {
@@ -397,6 +399,7 @@ function syncImagesFromAssets() {
       const row = Math.floor(index / asset.columns);
       const col = index % asset.columns;
       const defaultAlias = `${baseAlias}_${String(index + 1).padStart(2, "0")}`;
+      const existing = existingById.get(id);
 
       images.push({
         id,
@@ -405,7 +408,8 @@ function syncImagesFromAssets() {
         index,
         row,
         col,
-        alias: aliasesById.get(id) || defaultAlias,
+        alias: existing?.alias || defaultAlias,
+        rotation: normalizeRotation(existing?.rotation),
       });
     }
   }
@@ -423,6 +427,7 @@ function syncImageSheet() {
     image.assetFileName,
     String(image.index + 1),
     image.alias,
+    String(normalizeRotation(image.rotation)),
   ]);
 }
 
@@ -434,9 +439,11 @@ function syncImageFromSheet(rowIndex) {
 
   const row = state.sheets.images[rowIndex];
   image.alias = row[2] || defaultImageAlias(image);
+  image.rotation = normalizeRotation(row[3]);
   row[0] = image.assetFileName;
   row[1] = String(image.index + 1);
   row[2] = image.alias;
+  row[3] = String(image.rotation);
 }
 
 function syncCardsFromImages() {
@@ -524,6 +531,11 @@ function clampPositiveInteger(value, fallback) {
     return fallback;
   }
   return parsed;
+}
+
+function normalizeRotation(value) {
+  const parsed = Number.parseFloat(String(value ?? "").trim());
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function renderAll() {
@@ -811,8 +823,12 @@ async function buildImageSlice(image, asset) {
   const rows = Math.max(1, asset.rows);
   const tileWidth = asset.width ? asset.width / cols : 1;
   const tileHeight = asset.height ? asset.height / rows : 1;
-  const ratio = tileWidth / tileHeight;
-  const source = await getImageSliceDataUrl(image);
+  const rotation = normalizeRotation(image.rotation);
+  const radians = (rotation * Math.PI) / 180;
+  const rotatedWidth = Math.abs(tileWidth * Math.cos(radians)) + Math.abs(tileHeight * Math.sin(radians));
+  const rotatedHeight = Math.abs(tileWidth * Math.sin(radians)) + Math.abs(tileHeight * Math.cos(radians));
+  const ratio = rotatedWidth / rotatedHeight;
+  const source = await getRotatedImageSliceDataUrl(image);
 
   return `
     <img
@@ -901,7 +917,7 @@ async function buildCardTemplatePreview(card, side = "front") {
     throw new Error(`${sideLabel} image alias not found.`);
   }
 
-  const imageDataUrl = await getImageSliceDataUrl(cardImage);
+  const imageDataUrl = await getRotatedImageSliceDataUrl(cardImage);
   const parser = new DOMParser();
   const documentSvg = parser.parseFromString(template.svgText, "image/svg+xml");
   const svg = documentSvg.querySelector("svg");
@@ -1274,7 +1290,7 @@ async function buildGeneratedSheetSvg(workingSheet, side, addWarning) {
       continue;
     }
 
-    const imageDataUrl = await getImageSliceDataUrl(image);
+    const imageDataUrl = await getRotatedImageSliceDataUrl(image);
     imageNode.setAttribute("href", imageDataUrl);
     imageNode.removeAttributeNS("http://www.w3.org/1999/xlink", "href");
     replacedNodes.push(imageNode);
@@ -1292,6 +1308,14 @@ function hideGeneratedSheetPrintGuides(documentSvg) {
   const inheritedPaints = new Map();
 
   for (const element of documentSvg.querySelectorAll("*")) {
+    // Paint inside <defs> can describe clip paths, masks, markers, and other
+    // reusable geometry. Hiding it can make otherwise unrelated artwork
+    // disappear (for example, an image clipped by a cut-guide-colored circle).
+    // Only hide guide-colored elements that participate in the rendered tree.
+    if (element.closest("defs")) {
+      continue;
+    }
+
     const paint = getEffectiveSvgPaint(element, stylePaintRules, inheritedPaints);
     if (isPrintGuidePaint(paint.stroke, paint.color) || isPrintGuidePaint(paint.fill, paint.color)) {
       element.setAttribute("display", "none");
@@ -1582,6 +1606,39 @@ async function getImageSliceDataUrl(image) {
   );
   image.sliceDataUrl = canvas.toDataURL("image/png");
   return image.sliceDataUrl;
+}
+
+async function getRotatedImageSliceDataUrl(image) {
+  const rotation = normalizeRotation(image.rotation);
+  if (rotation === 0) {
+    return getImageSliceDataUrl(image);
+  }
+  if (image.rotatedSliceDataUrl && image.rotatedSliceRotation === rotation) {
+    return image.rotatedSliceDataUrl;
+  }
+
+  const source = await loadImageElement(await getImageSliceDataUrl(image));
+  const width = source.naturalWidth || source.width || 1;
+  const height = source.naturalHeight || source.height || 1;
+  const radians = (rotation * Math.PI) / 180;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(
+    1,
+    Math.ceil(Math.abs(width * Math.cos(radians)) + Math.abs(height * Math.sin(radians))),
+  );
+  canvas.height = Math.max(
+    1,
+    Math.ceil(Math.abs(width * Math.sin(radians)) + Math.abs(height * Math.cos(radians))),
+  );
+
+  const context = canvas.getContext("2d");
+  context.translate(canvas.width / 2, canvas.height / 2);
+  context.rotate(radians);
+  context.drawImage(source, -width / 2, -height / 2, width, height);
+
+  image.rotatedSliceRotation = rotation;
+  image.rotatedSliceDataUrl = canvas.toDataURL("image/png");
+  return image.rotatedSliceDataUrl;
 }
 
 function loadImageElement(src) {
@@ -2435,6 +2492,7 @@ function exportYaml() {
     })),
     images: state.images.map((image) => ({
       alias: image.alias,
+      rotation: normalizeRotation(image.rotation),
       assetFileName: image.assetFileName,
       assetId: image.assetId,
       index: image.index + 1,
@@ -2619,6 +2677,7 @@ function restoreImages(images) {
       row: Math.max(0, Number(image.row || Math.floor(index / columns) + 1) - 1),
       col: Math.max(0, Number(image.column || (index % columns) + 1) - 1),
       alias: image.alias || "",
+      rotation: normalizeRotation(image.rotation),
     };
   });
 
@@ -2664,6 +2723,11 @@ function restoreImageSheet(rows) {
   }
 
   state.sheets.images = normalizeSheet(rows, imageColumns.length).slice(0, state.images.length);
+  state.sheets.images.forEach((row, index) => {
+    if (rows[index]?.length < imageColumns.length) {
+      row[3] = String(normalizeRotation(state.images[index]?.rotation));
+    }
+  });
   state.sheets.images.forEach((_, index) => syncImageFromSheet(index));
 }
 
